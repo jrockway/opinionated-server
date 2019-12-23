@@ -38,7 +38,7 @@ for example.)
 gRPC will be served even if you don't add any additional handlers with `server.AddService`. We provide the standard
 [Health Check](https://github.com/grpc/grpc/blob/master/doc/health-checking.md) service (compatible with
 [Envoy](https://www.envoyproxy.io/docs/envoy/latest/api-v2/api/v2/core/health_check.proto#envoy-api-msg-core-healthcheck-grpchealthcheck)
-and [Kubernetes](https://github.com/grpc-ecosystem/grpc-health-probe/)) and the Discovery service
+and [Kubernetes](https://github.com/grpc-ecosystem/grpc-health-probe/)), the [channelz](https://grpc.io/blog/a_short_introduction_to_channelz/) service, and the Discovery service
 (for use with `grpc_cli` or [grpcurl](https://github.com/fullstorydev/grpcurl)).
 
 ### Debug
