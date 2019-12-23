@@ -65,9 +65,9 @@ type logOptions struct {
 }
 
 type listenOptions struct {
-	HTTPAddress         string        `long:"http_address" description:"address to listen for http requests on" default:":8080" env:"HTTP_ADDRESS"`
-	DebugAddress        string        `long:"debug_address" description:"address to listen for debug http requests on" default:":8081" env:"DEBUG_ADDRESS"`
-	GRPCAddress         string        `long:"grpc_address" description:"address to listen for grpc requests on" default:":9000" env:"GRPC_ADDRESS"`
+	HTTPAddress         string        `long:"http_address" description:"address to listen for http requests on" default:"0.0.0.0:8080" env:"HTTP_ADDRESS"`
+	DebugAddress        string        `long:"debug_address" description:"address to listen for debug http requests on" default:"127.0.0.1:8081" env:"DEBUG_ADDRESS"`
+	GRPCAddress         string        `long:"grpc_address" description:"address to listen for grpc requests on" default:"0.0.0.0:9000" env:"GRPC_ADDRESS"`
 	ShutdownGracePeriod time.Duration `long:"shutdown_grace_period" description:"how long to wait on draining connections before exiting" default:"30s" env:"SHUTDOWN_GRACE_PERIOD"`
 }
 
