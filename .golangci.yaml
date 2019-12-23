@@ -1,0 +1,70 @@
+linters-settings:
+    govet:
+        check-shadowing: false # kind of broken with error-handling
+    golint:
+        min-confidence: 0
+    gocyclo:
+        min-complexity: 20
+    maligned:
+        suggest-new: true
+    dupl:
+        threshold: 150
+    goconst:
+        min-len: 3
+        min-occurrences: 3
+    depguard:
+        list-type: blacklist
+        packages: {}
+        packages-with-error-messages: {}
+    misspell:
+        locale: US
+    gocritic:
+        enabled-tags:
+            - diagnostic
+            - experimental
+            - opinionated
+            - performance
+            - style
+    funlen:
+        lines: 200
+        statements: 100
+    errcheck:
+        check-type-assertions: true
+        check-blank: true
+        exclude: .errcheck.txt
+
+linters:
+    # please, do not use `enable-all`: it's deprecated and will be removed soon.
+    # inverted configuration with `enable-all` and `disable` is not scalable during updates of golangci-lint
+    disable-all: true
+    enable:
+        - govet
+        - errcheck
+        - staticcheck
+        - unused
+        - gosimple
+        - structcheck
+        - varcheck
+        - ineffassign
+        - deadcode
+        - typecheck
+        - bodyclose
+        - golint
+        - stylecheck
+        - gosec
+        - interfacer
+        - unconvert
+        - dupl
+        - goconst
+        - gocyclo
+        - gofmt
+        - maligned
+        - depguard
+        - misspell
+        - unparam
+        - nakedret
+        - scopelint
+        - gocritic
+        - godox
+        - funlen
+        - whitespace
