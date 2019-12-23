@@ -1,3 +1,2 @@
 (*go.uber.org/zap.Logger).Sync
 (net/http.ResponseWriter).Write
-server.AddFlagGroup
