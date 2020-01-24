@@ -13,9 +13,10 @@ We use [zap](https://github.com/uber-go/zap) for structured logging. It is arran
 logs. The debug handler, described below, allows you to change the log level at runtime over HTTP.
 
 We use [Jaeger](https://www.jaegertracing.io/) for distributed tracing. All gRPC and HTTP calls are
-automatically traced. We use Uber's original propagation headers (`uber-trace-id`), not B3
-(`x-b3-trace-id`). When the W3C Trace Context standard is finalized, we will switch to that. You
-can configure Jaeger with the [standard environment variables](https://www.jaegertracing.io/docs/1.16/client-features/).
+automatically traced. We use [B3 propagation](https://github.com/openzipkin/b3-propagation) for
+easier interoperability with Zipkin (`x-b3-trace-id`). When the W3C Trace Context standard is
+finalized, we will switch to that. You can configure Jaeger with the
+[standard environment variables](https://www.jaegertracing.io/docs/1.16/client-features/).
 
 We use [Prometheus](https://prometheus.io/) for monitoring. HTTP and gRPC handlers are already
 instrumented. You can use `promauto.` to add additional metrics.
@@ -30,8 +31,9 @@ straightforward.
 ## The servers
 
 We start three servers. They are gracefully drained when SIGTERM or SIGINT is received. (So clients
-with long-running connections should not see connection resets when Kubernetes shuts down your pod,
-for example.)
+with requests in progress should not see connection resets when Kubernetes shuts down your pod, for
+example. Of course, your server can still randomly die at any time, so you should prepare yourself
+for aborted requests nonetheless.)
 
 ### gRPC
 
@@ -78,7 +80,7 @@ We use semantic versioning. Depending on `master` is likely to break your produc
 so pick a version explicitly.
 
 Changes that break your consuming Go code or change how your production environment will work will
-incrase the major version number. Updates that add features will increase the minor version
+increase the major version number. Updates that add features will increase the minor version
 number. Bug fixes or small tweaks will increase the patch level.
 
 ## Contribution policy
@@ -87,4 +89,5 @@ This is not meant to be a generic thing that meets all needs. Patches like "use 
 of Jaeger" or "use logrus instead of zap" will not be accepted. It is not worth making someone
 decide which of the 8 million possible libraries they should use. I already picked.
 
-Patches that add useful metrics, make it easier to run TLS, etc. would be greatly appreciated.
+Patches that add useful metrics, make it easier to run TLS for local testing, etc. would be greatly
+appreciated.

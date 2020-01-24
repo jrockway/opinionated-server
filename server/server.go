@@ -27,6 +27,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	jaegercfg "github.com/uber/jaeger-client-go/config"
 	jaegerzap "github.com/uber/jaeger-client-go/log/zap"
+	"github.com/uber/jaeger-client-go/zipkin"
 	jprom "github.com/uber/jaeger-lib/metrics/prometheus"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -148,9 +149,12 @@ func setupTracing() error {
 	if jcfg.ServiceName == "" {
 		jcfg.ServiceName = AppName
 	}
+	zipkinPropagator := zipkin.NewZipkinB3HTTPHeaderPropagator()
 	options := []jaegercfg.Option{
 		jaegercfg.Logger(jaegerzap.NewLogger(zap.L().Named("jaeger"))),
 		jaegercfg.Metrics(jprom.New()),
+		jaegercfg.Injector(opentracing.HTTPHeaders, zipkinPropagator),
+		jaegercfg.Extractor(opentracing.HTTPHeaders, zipkinPropagator),
 	}
 	tracer, closer, err := jcfg.NewTracer(options...)
 	if err != nil {
