@@ -301,7 +301,8 @@ func listenAndServe(stopCh chan string) error {
 
 	doneCh := make(chan error)
 	debugServer := &http.Server{
-		Handler: instrumentHandler("debug", nethttp.Middleware(opentracing.GlobalTracer(), http.DefaultServeMux, nethttp.MWSpanFilter(isNotMonitoring))),
+		Handler:  instrumentHandler("debug_http", nethttp.Middleware(opentracing.GlobalTracer(), http.DefaultServeMux, nethttp.MWSpanFilter(isNotMonitoring))),
+		ErrorLog: zap.NewStdLog(zap.L().Named("debug_http")),
 	}
 
 	var httpServer *http.Server
@@ -309,7 +310,8 @@ func listenAndServe(stopCh chan string) error {
 		// I'd rather blow up with a null pointer dereference than serve the debug mux on
 		// the main port, which is what happens if httpHandler is nil.
 		httpServer = &http.Server{
-			Handler: instrumentHandler("http", nethttp.Middleware(opentracing.GlobalTracer(), httpHandler)),
+			Handler:  instrumentHandler("http", nethttp.Middleware(opentracing.GlobalTracer(), httpHandler)),
+			ErrorLog: zap.NewStdLog(zap.L().Named("http")),
 		}
 	}
 
