@@ -77,6 +77,16 @@ is called `debug_http` and the main http server is caled `http`.
 
 ## Extras
 
+We use [automaxprocs](https://github.com/uber-go/automaxprocs) to set `$GOMAXPROCS`. This will help
+ensure that your program doesn't get throttled when running with CPU limits. I consider this
+relatively experimental because the current k8s wisdom is to never use CPU limits, and thus this
+code will never run. (The problem with CPU limits is that they work by allowing you to run until
+you've used your quota, then your entire process goes to sleep for the next throttling period. This
+results in high latency for requests that arrived towards the end of your throttling period.
+Setting `GOMAXPROCS` to your CPU quota will ensure that the Go runtime can't use any extra cores
+that will cause you to throttle, reducing the latency implications. The big caveat is that this only
+works for integer quotas.)
+
 When shutting down, we attempt to write our status to `/dev/termination-log`. A spurious message
 will be logged when that's not writable; if you aren't on Kubernetes, you don't need to worry about
 it.

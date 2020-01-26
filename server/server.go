@@ -30,6 +30,7 @@ import (
 	jaegerzap "github.com/uber/jaeger-client-go/log/zap"
 	"github.com/uber/jaeger-client-go/zipkin"
 	jprom "github.com/uber/jaeger-lib/metrics/prometheus"
+	"go.uber.org/automaxprocs/maxprocs"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	channelz "google.golang.org/grpc/channelz/service"
@@ -107,12 +108,22 @@ func Setup() {
 	}
 }
 
+func maxprocsLogger() maxprocs.Option {
+	l := zap.L().Named("maxprocs").WithOptions(zap.AddCallerSkip(1)).Sugar()
+	return maxprocs.Logger(func(msg string, args ...interface{}) {
+		l.Infof(msg, args)
+	})
+}
+
 func setup() error {
 	if listenOpts.ShutdownGracePeriod == 0 {
 		listenOpts.ShutdownGracePeriod = time.Second
 	}
 	if err := setupLogging(); err != nil {
 		return fmt.Errorf("setup logging: %w", err)
+	}
+	if _, err := maxprocs.Set(maxprocsLogger()); err != nil {
+		return fmt.Errorf("setup maxprocs: %w", err)
 	}
 	if err := setupTracing(); err != nil {
 		return fmt.Errorf("setup tracing: %w", err)

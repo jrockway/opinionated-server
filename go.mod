@@ -13,6 +13,7 @@ require (
 	github.com/prometheus/client_golang v1.3.0
 	github.com/uber/jaeger-client-go v2.21.1+incompatible
 	github.com/uber/jaeger-lib v2.2.0+incompatible
+	go.uber.org/automaxprocs v1.3.0
 	go.uber.org/zap v1.13.0
 	google.golang.org/grpc v1.26.0
 )
