@@ -67,6 +67,9 @@ type logOptions struct {
 	LogLevel       string `long:"log_level" description:"zap level to log at" default:"debug" env:"LOG_LEVEL"`
 	DevelopmentLog bool   `long:"pretty_logs" description:"use the nicer-to-look at development log" env:"PRETTY_LOGS"`
 	GRPCVerbosity  int    `long:"grpc_verbosity" description:"verbosity level of grpc logs" default:"0" env:"GRPC_GO_LOG_VERBOSITY_LEVEL"`
+
+	LogMetadata bool `long:"log_metadata" description:"log headers/metadata for each http or grpc request" env:"LOG_METADATA"`
+	LogPayloads bool `long:"log_payloads" description:"log requests and responses for each http or grpc request; if true, payloads are logged to the logger and reported to jaeger" env:"LOG_PAYLOADS"`
 }
 
 type listenOptions struct {
@@ -229,8 +232,15 @@ func isNotMonitoring(req *http.Request) bool {
 	return true
 }
 
-func notHealthCheck(_ opentracing.SpanContext, method string, _, _ interface{}) bool {
-	return method != "/grpc.health.v1.Health/Check"
+func suppressInstrumentation(method string) bool {
+	return strings.HasPrefix(method, "/grpc.health.v1.Health/")
+}
+
+func shouldTrace(spanCtx opentracing.SpanContext, method string, req, _ interface{}) bool {
+	if spanCtx != nil {
+		return true
+	}
+	return !suppressInstrumentation(method)
 }
 
 var (
@@ -335,12 +345,14 @@ func listenAndServe(stopCh chan string) error {
 
 	grpcServer := grpc.NewServer(
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			otgrpc.OpenTracingServerInterceptor(opentracing.GlobalTracer(), otgrpc.IncludingSpans(notHealthCheck)),
+			otgrpc.OpenTracingServerInterceptor(opentracing.GlobalTracer(), otgrpc.IncludingSpans(shouldTrace)),
 			grpc_prometheus.UnaryServerInterceptor,
+			loggingUnaryServerInterceptor(),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			otgrpc.OpenTracingStreamServerInterceptor(opentracing.GlobalTracer(), otgrpc.IncludingSpans(notHealthCheck)),
+			otgrpc.OpenTracingStreamServerInterceptor(opentracing.GlobalTracer(), otgrpc.IncludingSpans(shouldTrace)),
 			grpc_prometheus.StreamServerInterceptor,
+			loggingStreamServerInterceptor(),
 		)),
 	)
 	healthServer := health.NewServer()

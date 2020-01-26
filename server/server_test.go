@@ -25,6 +25,13 @@ func isHealthy(ctx context.Context, conn *grpc.ClientConn) error {
 }
 
 func runServerTest(ctx context.Context, t *testing.T, test func(t *testing.T, info Info)) {
+	logOpts.LogMetadata = true
+	logOpts.LogPayloads = true
+	defer func() {
+		logOpts.LogMetadata = false
+		logOpts.LogPayloads = false
+
+	}()
 	web := http.NewServeMux()
 	web.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusOK)
