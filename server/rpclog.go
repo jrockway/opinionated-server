@@ -159,11 +159,13 @@ func loggingHttpInterceptor(name string, handler http.Handler) http.Handler {
 		logctx := ctxzap.ToContext(ctx, logger)
 		req = req.WithContext(logctx)
 
-		reqLogger := logger
-		if logOpts.LogMetadata {
-			reqLogger = logger.With(zap.Array("headers", &mdw{req.Header}))
+		if isNotMonitoring(req) {
+			reqLogger := logger
+			if logOpts.LogMetadata {
+				reqLogger = logger.With(zap.Array("headers", &mdw{req.Header}))
+			}
+			reqLogger.Debug("http request")
 		}
-		reqLogger.Debug("http request")
 
 		handler.ServeHTTP(w, req)
 		// TODO(jrockway): wrap the requestwriter to print the status here
