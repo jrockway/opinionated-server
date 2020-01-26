@@ -151,17 +151,21 @@ func loggingUnaryServerInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
-func loggingHttpInterceptor(next http.Handler) http.Handler {
+func loggingHttpInterceptor(name string, handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		ctx := req.Context()
-		logger := zap.L().With(zap.String("uri", req.URL.String()), jaegerzap.Trace(ctx))
+		logger := zap.L().Named(name).With(zap.String("uri", req.URL.String()), jaegerzap.Trace(ctx))
+
+		logctx := ctxzap.ToContext(ctx, logger)
+		req = req.WithContext(logctx)
 
 		reqLogger := logger
 		if logOpts.LogMetadata {
 			reqLogger = logger.With(zap.Array("headers", &mdw{req.Header}))
 		}
 		reqLogger.Debug("http request")
-		next.ServeHTTP(w, req)
+
+		handler.ServeHTTP(w, req)
 		// TODO(jrockway): wrap the requestwriter to print the status here
 	})
 }
