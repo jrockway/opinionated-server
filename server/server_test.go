@@ -53,7 +53,6 @@ func runServerTest(ctx context.Context, t *testing.T, test func(t *testing.T, in
 	case err := <-doneCh:
 		t.Fatalf("server exited before calling startup callback: %v", err)
 	case info = <-infoCh:
-		t.Logf("server listening on: %v", info)
 	}
 
 	test(t, info)

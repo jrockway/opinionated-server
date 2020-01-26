@@ -58,8 +58,9 @@ var (
 	serviceHooks    []func(s *grpc.Server)
 	startupCallback func(Info)
 
-	debugSetup   = false
-	tracingSetup = false
+	debugSetup       = false
+	tracingSetup     = false
+	grpcLogInstalled = false
 )
 
 type logOptions struct {
@@ -147,7 +148,10 @@ func setupLogging() error {
 	if err := logLevel.UnmarshalText([]byte(logOpts.LogLevel)); err != nil {
 		return fmt.Errorf("set log level: %w", err)
 	}
-	grpc_zap.ReplaceGrpcLoggerV2WithVerbosity(zap.L().WithOptions(zap.AddCallerSkip(2)), logOpts.GRPCVerbosity)
+	if !grpcLogInstalled {
+		grpcLogInstalled = true
+		grpc_zap.ReplaceGrpcLoggerV2WithVerbosity(zap.L().WithOptions(zap.AddCallerSkip(2)), logOpts.GRPCVerbosity)
+	}
 	return nil
 }
 
