@@ -18,6 +18,7 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_zap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/grpc-ecosystem/grpc-opentracing/go/otgrpc"
 	"github.com/jessevdk/go-flags"
@@ -192,7 +193,16 @@ func setupDebug() {
 		return
 	}
 	http.Handle("/metrics", promhttp.Handler())
-	http.Handle("/zap", logLevel)
+	http.HandleFunc("/zap",
+		func(w http.ResponseWriter, req *http.Request) {
+			before := logLevel.Level().CapitalString()
+			logLevel.ServeHTTP(w, req)
+			after := logLevel.Level().CapitalString()
+			if before != after {
+				ctxzap.Extract(req.Context()).Info("set log level", zap.String("original", before), zap.String("new", after))
+			}
+
+		})
 	debugSetup = true
 }
 
