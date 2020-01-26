@@ -30,8 +30,10 @@ import (
 	"github.com/uber/jaeger-client-go/zipkin"
 	jprom "github.com/uber/jaeger-lib/metrics/prometheus"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapgrpc"
 	"google.golang.org/grpc"
 	channelz "google.golang.org/grpc/channelz/service"
+	"google.golang.org/grpc/grpclog"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -315,6 +317,7 @@ func listenAndServe(stopCh chan string) error {
 		}
 	}
 
+	grpclog.SetLogger(zapgrpc.NewLogger(zap.L().Named("grpc").WithOptions(zap.AddCallerSkip(3))))
 	grpcServer := grpc.NewServer(
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			otgrpc.OpenTracingServerInterceptor(opentracing.GlobalTracer(), otgrpc.IncludingSpans(notHealthCheck)),
