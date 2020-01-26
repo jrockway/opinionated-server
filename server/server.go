@@ -153,7 +153,7 @@ func setupTracing() error {
 	}
 	zipkinPropagator := zipkin.NewZipkinB3HTTPHeaderPropagator()
 	options := []jaegercfg.Option{
-		jaegercfg.Logger(jaegerzap.NewLogger(zap.L().Named("jaeger"))),
+		jaegercfg.Logger(jaegerzap.NewLogger(zap.L().Named("jaeger").WithOptions(zap.AddCallerSkip(1)))),
 		jaegercfg.Metrics(jprom.New()),
 		jaegercfg.Injector(opentracing.HTTPHeaders, zipkinPropagator),
 		jaegercfg.Extractor(opentracing.HTTPHeaders, zipkinPropagator),
