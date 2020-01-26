@@ -295,7 +295,7 @@ func instrumentHandler(name string, handler http.Handler) http.Handler {
 			promhttp.InstrumentHandlerCounter(httpCounter.MustCurryWith(l),
 				promhttp.InstrumentHandlerRequestSize(httpRequestSize.MustCurryWith(l),
 					promhttp.InstrumentHandlerResponseSize(httpResponseSize.MustCurryWith(l),
-						handler,
+						loggingHttpInterceptor(handler),
 					),
 				),
 			),
@@ -329,7 +329,7 @@ func listenAndServe(stopCh chan string) error {
 
 	doneCh := make(chan error)
 	debugServer := &http.Server{
-		Handler:  instrumentHandler("debug_http", nethttp.Middleware(opentracing.GlobalTracer(), http.DefaultServeMux, nethttp.MWSpanFilter(isNotMonitoring))),
+		Handler:  nethttp.Middleware(opentracing.GlobalTracer(), instrumentHandler("debug_http", http.DefaultServeMux), nethttp.MWSpanFilter(isNotMonitoring), nethttp.MWComponentName("debug_http")),
 		ErrorLog: zap.NewStdLog(zap.L().Named("debug_http")),
 	}
 
@@ -338,7 +338,7 @@ func listenAndServe(stopCh chan string) error {
 		// I'd rather blow up with a null pointer dereference than serve the debug mux on
 		// the main port, which is what happens if httpHandler is nil.
 		httpServer = &http.Server{
-			Handler:  instrumentHandler("http", nethttp.Middleware(opentracing.GlobalTracer(), httpHandler)),
+			Handler:  nethttp.Middleware(opentracing.GlobalTracer(), instrumentHandler("http", httpHandler), nethttp.MWComponentName("http")),
 			ErrorLog: zap.NewStdLog(zap.L().Named("http")),
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"path"
 	"sort"
 	"sync"
@@ -148,6 +149,21 @@ func loggingUnaryServerInterceptor() grpc.UnaryServerInterceptor {
 		logEnd(ctx, info.FullMethod, start, nil, res, err)
 		return res, err
 	}
+}
+
+func loggingHttpInterceptor(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		ctx := req.Context()
+		logger := zap.L().With(zap.String("uri", req.URL.String()), jaegerzap.Trace(ctx))
+
+		reqLogger := logger
+		if logOpts.LogMetadata {
+			reqLogger = logger.With(zap.Array("headers", &mdw{req.Header}))
+		}
+		reqLogger.Debug("http request")
+		next.ServeHTTP(w, req)
+		// TODO(jrockway): wrap the requestwriter to print the status here
+	})
 }
 
 // wrap the server stream to log send/recv events, capture the trailers, and let the rpc method

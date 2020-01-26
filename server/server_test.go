@@ -27,6 +27,7 @@ func isHealthy(ctx context.Context, conn *grpc.ClientConn) error {
 func runServerTest(ctx context.Context, t *testing.T, test func(t *testing.T, info Info)) {
 	logOpts.LogMetadata = true
 	logOpts.LogPayloads = true
+	logOpts.LogLevel = "debug"
 	defer func() {
 		logOpts.LogMetadata = false
 		logOpts.LogPayloads = false
