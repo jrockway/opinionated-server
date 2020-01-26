@@ -433,17 +433,6 @@ var terminationLog = "/dev/termination-log"
 // all servers have exited, we exit the program.
 func ListenAndServe() {
 	stopCh := make(chan string)
-	http.HandleFunc("/quitquitquit", func(w http.ResponseWriter, req *http.Request) {
-		ctx := req.Context()
-		select {
-		case stopCh <- "quitquitquit":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("bye"))
-		case <-ctx.Done():
-			http.Error(w, fmt.Sprintf("%v", ctx.Err()), http.StatusInternalServerError)
-		}
-	})
-
 	sigCh := make(chan os.Signal)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
