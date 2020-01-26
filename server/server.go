@@ -17,6 +17,7 @@ import (
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	grpc_zap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/grpc-ecosystem/grpc-opentracing/go/otgrpc"
 	"github.com/jessevdk/go-flags"
@@ -30,10 +31,8 @@ import (
 	"github.com/uber/jaeger-client-go/zipkin"
 	jprom "github.com/uber/jaeger-lib/metrics/prometheus"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapgrpc"
 	"google.golang.org/grpc"
 	channelz "google.golang.org/grpc/channelz/service"
-	"google.golang.org/grpc/grpclog"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -65,6 +64,7 @@ var (
 type logOptions struct {
 	LogLevel       string `long:"log_level" description:"zap level to log at" default:"debug" env:"LOG_LEVEL"`
 	DevelopmentLog bool   `long:"pretty_logs" description:"use the nicer-to-look at development log" env:"PRETTY_LOGS"`
+	GRPCVerbosity  int    `long:"grpc_verbosity" description:"verbosity level of grpc logs" default:"0" env:"GRPC_GO_LOG_VERBOSITY_LEVEL"`
 }
 
 type listenOptions struct {
@@ -136,6 +136,7 @@ func setupLogging() error {
 	if err := logLevel.UnmarshalText([]byte(logOpts.LogLevel)); err != nil {
 		return fmt.Errorf("set log level: %w", err)
 	}
+	grpc_zap.ReplaceGrpcLoggerV2WithVerbosity(zap.L().WithOptions(zap.AddCallerSkip(2)), logOpts.GRPCVerbosity)
 	return nil
 }
 
@@ -317,7 +318,6 @@ func listenAndServe(stopCh chan string) error {
 		}
 	}
 
-	grpclog.SetLogger(zapgrpc.NewLogger(zap.L().Named("grpc").WithOptions(zap.AddCallerSkip(3))))
 	grpcServer := grpc.NewServer(
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			otgrpc.OpenTracingServerInterceptor(opentracing.GlobalTracer(), otgrpc.IncludingSpans(notHealthCheck)),
