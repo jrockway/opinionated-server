@@ -1,0 +1,53 @@
+resource_types:
+    - name: file-url
+      type: registry-image
+      source:
+          repository: pivotalservices/concourse-curl-resource
+          tag: latest
+resources:
+    - name: source
+      type: git
+      icon: github-circle
+      source:
+          uri: https://github.com/jrockway/opinionated-server
+    - name: golang-latest
+      type: registry-image
+      icon: docker
+      source:
+          repository: golang
+          tag: latest
+    - name: codecov
+      type: file-url
+      source:
+          url: https://codecov.io/bash
+          filename: codecov.sh
+
+jobs:
+    - name: tests
+      public: true
+      plan:
+          - get: golang-latest
+            trigger: true
+          - get: codecov
+            trigger: false
+          - get: source
+            trigger: true
+          - task: test
+            image: golang-latest
+            params:
+                CODECOV_TOKEN: ((opinionated-server.token))
+            config:
+                platform: linux
+                inputs:
+                    - name: source
+                      path: opinionated-server
+                    - name: codecov
+                      path: codecov
+                run:
+                    path: /bin/sh
+                    args:
+                        - -c
+                        - |
+                            cd opinionated-server
+                            go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+                            bash ../codecov/codecov.sh
