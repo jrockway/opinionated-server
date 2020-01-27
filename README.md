@@ -11,11 +11,17 @@ For a quick start, take a look at an [example server](https://github.com/jrockwa
 We use [zap](https://github.com/uber-go/zap) for structured logging. It is arranged for standard
 `log` calls to go to zap. You can also use `zap.L()` anywhere in your program to produce structured
 logs. The debug handler, described below, allows you to change the log level at runtime over HTTP.
+RPC methods have a method-scoped logger available from
+[ctxzap](https://godoc.org/github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap).`Extract(ctx)`
+for your own logs, and requests, responses and gRPC stream messages are automatically logged at the
+debug level. (Errors are logged at the error level.) Right now there is some complexity around
+logging HTTP responses, so you will only see requests.
+See [issue #4](https://github.com/jrockway/opinionated-server/issues/4).
 
 We use [Jaeger](https://www.jaegertracing.io/) for distributed tracing. All gRPC and HTTP calls are
 automatically traced. We use [B3 propagation](https://github.com/openzipkin/b3-propagation) for
-easier interoperability with Zipkin (`x-b3-trace-id`). When the W3C Trace Context standard is
-finalized, we will switch to that. You can configure Jaeger with the
+easier interoperability with Zipkin (`x-b3-traceid`). When the W3C Trace Context standard is
+finalized, we will switch to that (with a major version bump). You can configure Jaeger with the
 [standard environment variables](https://www.jaegertracing.io/docs/1.16/client-features/).
 
 We use [Prometheus](https://prometheus.io/) for monitoring. HTTP and gRPC handlers are already
