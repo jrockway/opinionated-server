@@ -1,5 +1,7 @@
 # opinionated-server
 
+![CI](https://ci.jrock.us/api/v1/teams/main/pipelines/opinionated-server/jobs/tests/badge)
+
 Every time I need a quick gRPC or HTTP server I end up spending three hours hooking in all the
 little additions I want. This package represents my opinion on what this server should always look
 like. If you agree with my opinions, you can save yourself those three hours.
