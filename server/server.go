@@ -58,6 +58,7 @@ var (
 	httpHandler     http.Handler
 	serviceHooks    []func(s *grpc.Server)
 	startupCallback func(Info)
+	drainCh         chan struct{} = nil
 
 	debugSetup       = false
 	tracingSetup     = false
@@ -230,6 +231,22 @@ func SetStartupCallback(cb func(Info)) {
 	startupCallback = cb
 }
 
+// Draining returns a context that is closed when the server begins draining.  You can write code
+// like:
+//
+//     select {
+//     case <-server.Draining():
+//             return errors.New("server draining")
+//     case <-ctx.Done():
+//             ...
+//     }
+//
+// To abort requests when a shutdown is requested.  You don't have to; you have until the grace
+// period to finish up the request.
+func Draining() chan struct{} {
+	return drainCh
+}
+
 // isNotMonitoring returns true if the request is not monitoring.  (This is to suppress tracing of
 // kubelet health checks and prometheus metric scrapes.)
 func isNotMonitoring(req *http.Request) bool {
@@ -315,6 +332,8 @@ func instrumentHandler(name string, handler http.Handler) http.Handler {
 
 // listenAndSereve starts the server and runs until stopped.
 func listenAndServe(stopCh chan string) error {
+	drainCh = make(chan struct{})
+
 	debugListener, err := net.Listen("tcp", listenOpts.DebugAddress)
 	if err != nil {
 		return fmt.Errorf("listen on debug port: %w", err)
@@ -416,7 +435,9 @@ func listenAndServe(stopCh chan string) error {
 
 	tctx, c := context.WithTimeout(context.Background(), listenOpts.ShutdownGracePeriod)
 	defer c()
-	healthServer.Shutdown()       // nolint
+	healthServer.Shutdown() // nolint
+	close(drainCh)
+
 	go grpcServer.GracefulStop()  // nolint
 	go debugServer.Shutdown(tctx) // nolint
 	if httpServer != nil {

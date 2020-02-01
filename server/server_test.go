@@ -31,7 +31,6 @@ func runServerTest(ctx context.Context, t *testing.T, test func(t *testing.T, in
 	defer func() {
 		logOpts.LogMetadata = false
 		logOpts.LogPayloads = false
-
 	}()
 	web := http.NewServeMux()
 	web.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
@@ -105,6 +104,7 @@ func TestDefaultServers(t *testing.T) {
 		if got, want := info.HTTPAddress, ""; got != want {
 			t.Errorf("http address:\n  got: %v\n want: %v", got, want)
 		}
+		conn.Close()
 	})
 }
 
@@ -134,4 +134,50 @@ func TestHTTPServer(t *testing.T) {
 		}
 		res.Body.Close()
 	})
+}
+
+func TestDrain(t *testing.T) {
+	logOpts.LogMetadata = true
+	logOpts.LogPayloads = true
+	logOpts.LogLevel = "debug"
+	defer func() {
+		logOpts.LogMetadata = false
+		logOpts.LogPayloads = false
+
+	}()
+
+	infoCh := make(chan Info)
+	SetStartupCallback(func(info Info) { infoCh <- info })
+	defer func() { startupCallback = nil }()
+
+	http.HandleFunc("/wait-for-drain", func(w http.ResponseWriter, req *http.Request) {
+		ctx := req.Context()
+		select {
+		case <-Draining():
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("draining"))
+		case <-ctx.Done():
+			http.Error(w, ctx.Err().Error(), http.StatusRequestTimeout)
+		}
+	})
+
+	killCh := make(chan string)
+	serverDoneCh := make(chan error)
+	go func() { serverDoneCh <- listenAndServe(killCh) }()
+
+	var info Info
+	select {
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for startup")
+	case info = <-infoCh:
+		close(infoCh)
+	}
+	time.AfterFunc(200*time.Millisecond, func() { killCh <- "force drain" })
+	res, err := http.Get("http://" + info.DebugAddress + "/wait-for-drain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := res.StatusCode, http.StatusOK; got != want {
+		t.Errorf("get /wait-for-drain: response status:\n  got: %v\n want: %v", got, want)
+	}
 }
