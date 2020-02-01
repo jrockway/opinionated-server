@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"path"
 	"sort"
@@ -226,7 +227,7 @@ func (w *wrappedServerStream) RecvMsg(m interface{}) error {
 	err := w.stream.RecvMsg(m)
 	if w.shouldLog && logOpts.LogPayloads && err == nil {
 		w.l.Debug("grpc call received message", zap.Object("grpc.incoming_msg", &pbw{m}))
-	} else if w.shouldLog && err != nil {
+	} else if w.shouldLog && err != nil && !errors.Is(err, io.EOF) {
 		w.l.Error("grpc receive message failed", zap.Error(err))
 	}
 	return err
