@@ -359,7 +359,11 @@ func listenAndServe(stopCh chan string) error {
 	var grpcListener net.Listener
 	if wantGrpc {
 		var err error
-		grpcListener, err = net.Listen("tcp", listenOpts.GRPCAddress)
+		if addr := listenOpts.GRPCAddress; strings.HasPrefix(addr, "unix:") {
+			grpcListener, err = net.Listen("unix", addr[len("unix:"):])
+		} else {
+			grpcListener, err = net.Listen("tcp", listenOpts.GRPCAddress)
+		}
 		if err != nil {
 			return fmt.Errorf("listen on grpc port: %w", err)
 		}
