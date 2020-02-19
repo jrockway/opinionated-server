@@ -60,6 +60,7 @@ var (
 	startupCallback func(Info)
 	drainCh         chan struct{} = nil
 
+	healthServer     = health.NewServer()
 	debugSetup       = false
 	tracingSetup     = false
 	grpcLogInstalled = false
@@ -155,7 +156,7 @@ func setupLogging() error {
 	}
 	if !grpcLogInstalled {
 		grpcLogInstalled = true
-		grpc_zap.ReplaceGrpcLoggerV2WithVerbosity(zap.L().WithOptions(zap.AddCallerSkip(2)), logOpts.GRPCVerbosity)
+		grpc_zap.ReplaceGrpcLoggerV2WithVerbosity(zap.L().Named("grpc").WithOptions(zap.AddCallerSkip(2)), logOpts.GRPCVerbosity)
 	}
 	return nil
 }
@@ -194,16 +195,30 @@ func setupDebug() {
 		return
 	}
 	http.Handle("/metrics", promhttp.Handler())
-	http.HandleFunc("/zap",
-		func(w http.ResponseWriter, req *http.Request) {
-			before := logLevel.Level().CapitalString()
-			logLevel.ServeHTTP(w, req)
-			after := logLevel.Level().CapitalString()
-			if before != after {
-				ctxzap.Extract(req.Context()).Info("set log level", zap.String("original", before), zap.String("new", after))
-			}
-
+	http.HandleFunc("/zap", func(w http.ResponseWriter, req *http.Request) {
+		before := logLevel.Level().CapitalString()
+		logLevel.ServeHTTP(w, req)
+		after := logLevel.Level().CapitalString()
+		if before != after {
+			ctxzap.Extract(req.Context()).Info("set log level", zap.String("original", before), zap.String("new", after))
+		}
+	})
+	http.HandleFunc("/healthz", func(w http.ResponseWriter, req *http.Request) {
+		reply, err := healthServer.Check(req.Context(), &grpc_health_v1.HealthCheckRequest{
+			Service: "",
 		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		status := reply.GetStatus()
+		if status != grpc_health_v1.HealthCheckResponse_SERVING {
+			http.Error(w, status.String(), http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(status.String()))
+	})
 	debugSetup = true
 }
 
@@ -333,6 +348,7 @@ func instrumentHandler(name string, handler http.Handler) http.Handler {
 // listenAndSereve starts the server and runs until stopped.
 func listenAndServe(stopCh chan string) error {
 	drainCh = make(chan struct{})
+	wantGrpc := len(serviceHooks) > 0
 
 	debugListener, err := net.Listen("tcp", listenOpts.DebugAddress)
 	if err != nil {
@@ -340,11 +356,15 @@ func listenAndServe(stopCh chan string) error {
 	}
 	defer debugListener.Close()
 
-	grpcListener, err := net.Listen("tcp", listenOpts.GRPCAddress)
-	if err != nil {
-		return fmt.Errorf("listen on grpc port: %w", err)
+	var grpcListener net.Listener
+	if wantGrpc {
+		var err error
+		grpcListener, err = net.Listen("tcp", listenOpts.GRPCAddress)
+		if err != nil {
+			return fmt.Errorf("listen on grpc port: %w", err)
+		}
+		defer grpcListener.Close()
 	}
-	defer grpcListener.Close()
 
 	var httpListener net.Listener
 	if httpHandler != nil {
@@ -372,44 +392,48 @@ func listenAndServe(stopCh chan string) error {
 		}
 	}
 
-	grpcServer := grpc.NewServer(
-		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			otgrpc.OpenTracingServerInterceptor(opentracing.GlobalTracer(), otgrpc.IncludingSpans(shouldTrace)),
-			grpc_prometheus.UnaryServerInterceptor,
-			loggingUnaryServerInterceptor(),
-		)),
-		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			otgrpc.OpenTracingStreamServerInterceptor(opentracing.GlobalTracer(), otgrpc.IncludingSpans(shouldTrace)),
-			grpc_prometheus.StreamServerInterceptor,
-			loggingStreamServerInterceptor(),
-		)),
-	)
-	healthServer := health.NewServer()
-	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
-	channelz.RegisterChannelzServiceToServer(grpcServer)
-	for _, h := range serviceHooks {
-		if h != nil {
-			h(grpcServer)
+	var grpcServer *grpc.Server
+	if wantGrpc {
+		grpcServer = grpc.NewServer(
+			grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
+				otgrpc.OpenTracingServerInterceptor(opentracing.GlobalTracer(), otgrpc.IncludingSpans(shouldTrace)),
+				grpc_prometheus.UnaryServerInterceptor,
+				loggingUnaryServerInterceptor(),
+			)),
+			grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
+				otgrpc.OpenTracingStreamServerInterceptor(opentracing.GlobalTracer(), otgrpc.IncludingSpans(shouldTrace)),
+				grpc_prometheus.StreamServerInterceptor,
+				loggingStreamServerInterceptor(),
+			)),
+		)
+		grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+		channelz.RegisterChannelzServiceToServer(grpcServer)
+		for _, h := range serviceHooks {
+			if h != nil {
+				h(grpcServer)
+			}
 		}
+		reflection.Register(grpcServer)
+		defer grpcServer.Stop()
 	}
-	reflection.Register(grpcServer)
-	defer grpcServer.Stop()
 
 	var servers int
 	servers++
 	go func() {
-		zap.L().Info("listening", zap.String("server", "debug"), zap.String("addr", listenOpts.DebugAddress))
+		zap.L().Info("listening", zap.String("server", "debug"), zap.String("addr", debugListener.Addr().String()))
 		doneCh <- fmt.Errorf("debug server: %v", debugServer.Serve(debugListener))
 	}()
-	servers++
-	go func() {
-		zap.L().Info("listening", zap.String("server", "grpc"), zap.String("addr", listenOpts.GRPCAddress))
-		doneCh <- fmt.Errorf("grpc server: %v", grpcServer.Serve(grpcListener))
-	}()
-	if httpHandler != nil {
+	if grpcServer != nil && grpcListener != nil {
 		servers++
 		go func() {
-			zap.L().Info("listening", zap.String("server", "http"), zap.String("addr", listenOpts.HTTPAddress))
+			zap.L().Info("listening", zap.String("server", "grpc"), zap.String("addr", grpcListener.Addr().String()))
+			doneCh <- fmt.Errorf("grpc server: %v", grpcServer.Serve(grpcListener))
+		}()
+	}
+	if httpHandler != nil && httpListener != nil {
+		servers++
+		go func() {
+			zap.L().Info("listening", zap.String("server", "http"), zap.String("addr", httpListener.Addr().String()))
 			doneCh <- fmt.Errorf("http server: %v", httpServer.Serve(httpListener))
 		}()
 	}
@@ -417,9 +441,11 @@ func listenAndServe(stopCh chan string) error {
 	if startupCallback != nil {
 		info := Info{
 			DebugAddress: debugListener.Addr().String(),
-			GRPCAddress:  grpcListener.Addr().String(),
 		}
-		if httpHandler != nil {
+		if grpcListener != nil {
+			info.GRPCAddress = grpcListener.Addr().String()
+		}
+		if httpListener != nil {
 			info.HTTPAddress = httpListener.Addr().String()
 		}
 		go startupCallback(info)
@@ -438,8 +464,10 @@ func listenAndServe(stopCh chan string) error {
 	healthServer.Shutdown() // nolint
 	close(drainCh)
 
-	go grpcServer.GracefulStop()  // nolint
 	go debugServer.Shutdown(tctx) // nolint
+	if grpcServer != nil {
+		go grpcServer.GracefulStop() // nolint
+	}
 	if httpServer != nil {
 		go httpServer.Shutdown(tctx) // nolint
 	}

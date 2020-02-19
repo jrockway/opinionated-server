@@ -6,7 +6,8 @@ Every time I need a quick gRPC or HTTP server I end up spending three hours hook
 little additions I want. This package represents my opinion on what this server should always look
 like. If you agree with my opinions, you can save yourself those three hours.
 
-For a quick start, take a look at an [example server](https://github.com/jrockway/opinionated-server/blob/master/example/main.go).
+For a quick start, take a look at an
+[example server](https://github.com/jrockway/opinionated-server/blob/master/example/main.go).
 
 ## What we add
 
@@ -17,8 +18,8 @@ RPC methods have a method-scoped logger available from
 [ctxzap](https://godoc.org/github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap).`Extract(ctx)`
 for your own logs, and requests, responses and gRPC stream messages are automatically logged at the
 debug level. (Errors are logged at the error level.) Right now there is some complexity around
-logging HTTP responses, so you will only see requests.
-See [issue #4](https://github.com/jrockway/opinionated-server/issues/4).
+logging HTTP responses, so you will only see requests. See
+[issue #4](https://github.com/jrockway/opinionated-server/issues/4).
 
 We use [Jaeger](https://www.jaegertracing.io/) for distributed tracing. All gRPC and HTTP calls are
 automatically traced. We use [B3 propagation](https://github.com/openzipkin/b3-propagation) for
@@ -45,43 +46,48 @@ for aborted requests nonetheless.)
 
 ### gRPC
 
-gRPC will be served even if you don't add any additional handlers with `server.AddService`. We
-provide the standard [Health Check](https://github.com/grpc/grpc/blob/master/doc/health-checking.md)
-service (compatible with
+A gRPC server is started if you add a service with `server.AddService`. We provide the standard
+[Health Check](https://github.com/grpc/grpc/blob/master/doc/health-checking.md) service (compatible
+with
 [Envoy](https://www.envoyproxy.io/docs/envoy/latest/api-v2/api/v2/core/health_check.proto#envoy-api-msg-core-healthcheck-grpchealthcheck)
 and [Kubernetes](https://github.com/grpc-ecosystem/grpc-health-probe/)), the
 [channelz](https://grpc.io/blog/a_short_introduction_to_channelz/) service, and the Discovery
 service (for use with `grpc_cli` or [grpcurl](https://github.com/fullstorydev/grpcurl)).
 
 We redirect grpc's internal logs to a Zap logger. Logs from grpc itself can be identified with a
-`{"system":"grpc","grpc_log":true}` tag on the message. A side effect of this redirection is that
-grpc will log at the same level as everything else, and is no longer controlled through
-`$GRPC_GO_LOG_SEVERITY_LEVEL`. If you set your log level to `info`, then you'll get grpc's `info`
-logs as well. `$GRPC_GO_LOG_VERBOSITY_LEVEL` is similarly subsumed, but we add the functionality
-back in a way that is exactly compatible with programs that do not use opinionated-server.
+`{"logger": "grpc","system":"grpc","grpc_log":true}` tag on the message. A side effect of this
+redirection is that grpc will log at the same level as everything else, and is no longer controlled
+through `$GRPC_GO_LOG_SEVERITY_LEVEL`. If you set your log level to `info`, then you'll get grpc's
+`info` logs as well. `$GRPC_GO_LOG_VERBOSITY_LEVEL` is similarly subsumed, but we add the
+functionality back in a way that is exactly compatible with programs that do not use
+opinionated-server.
 
 ### Debug
 
-A debug server serves the default serve mux (to avoid exposing internal resources unintentionally). It contains:
+A debug server serves the default serve mux (to avoid exposing internal resources unintentionally).
+It contains:
 
--   `/metrics` for Prometheus to scrape. By default, you get Go statistics (memory use, goroutine count, etc.), detailed gRPC statistics, detailed HTTP statistics, and Jaeger statistics.
--   `/zap` for adjusting the zap log level. (See [the godoc](https://godoc.org/go.uber.org/zap#AtomicLevel.ServeHTTP) for details. It is in the scope of this project to have a utility that automatically changes the log level, given something like a named Kubernetes deployment, but it's not here yet.)
+-   `/healthz` returns the state of the gRPC health checker over plain HTTP. If the app is running,
+    it return HTTP status 200 and the string "SERVING". Otherwise, it will return a 5xx error.
+-   `/metrics` for Prometheus to scrape. By default, you get Go statistics (memory use, goroutine
+    count, etc.), detailed gRPC statistics, detailed HTTP statistics, and Jaeger statistics.
+-   `/zap` for adjusting the zap log level. (See
+    [the godoc](https://godoc.org/go.uber.org/zap#AtomicLevel.ServeHTTP) for details. It is in the
+    scope of this project to have a utility that automatically changes the log level, given
+    something like a named Kubernetes deployment, but it's not here yet.)
 -   `/debug/pprof/` for [standard go profiling](https://golang.org/pkg/net/http/pprof/).
 
-You can add your own health handler (`http.Handle('/healthz', ...)`) if you don't want to use the
-gRPC health checking.
-
 You should ensure that when running your server that external traffic cannot reach the debug port,
-or that it goes through an authenticating proxy first. Handlers attached to the debug server are
-not designed to be secure against untrusted inputs, and can leak information about your server.
+or that it goes through an authenticating proxy first. Handlers attached to the debug server are not
+designed to be secure against untrusted inputs, and can leak information about your server.
 
 ### HTTP
 
 If you add an HTTP handler to the server with `server.SetHTTPHandler`, an additional port will be
 bound to serve this handler. To serve multiple "pages", use an `http.ServeMux`.
 
-We send internal log messages generated by `net/http` through named zap loggers. The debug server
-is called `debug_http` and the main http server is caled `http`.
+We send internal log messages generated by `net/http` through named zap loggers. The debug server is
+called `debug_http` and the main http server is caled `http`.
 
 ## Extras
 
@@ -90,10 +96,10 @@ ensure that your program doesn't get throttled when running with CPU limits. I c
 relatively experimental because the current k8s wisdom is to never use CPU limits, and thus this
 code will never run. (The problem with CPU limits is that they work by allowing you to run until
 you've used your quota, then your entire process goes to sleep for the next throttling period. This
-results in high latency for requests that arrived towards the end of your throttling period.
-Setting `GOMAXPROCS` to your CPU quota will ensure that the Go runtime can't use any extra cores
-that will cause you to throttle, reducing the latency implications. The big caveat is that this only
-works for integer quotas.)
+results in high latency for requests that arrived towards the end of your throttling period. Setting
+`GOMAXPROCS` to your CPU quota will ensure that the Go runtime can't use any extra cores that will
+cause you to throttle, reducing the latency implications. The big caveat is that this only works for
+integer quotas.)
 
 When shutting down, we attempt to write our status to `/dev/termination-log`. A spurious message
 will be logged when that's not writable; if you aren't on Kubernetes, you don't need to worry about
@@ -101,7 +107,8 @@ it.
 
 ### Configuration
 
-The `config/` directory contains example configurations showing how to integrate the outside world with a server written using this framework.
+The `config/` directory contains example configurations showing how to integrate the outside world
+with a server written using this framework.
 
 The `config/grafana/` directory contains example dashboards that take advantage of the metrics we
 collect.
@@ -110,12 +117,12 @@ Both of these are currently empty, but should be filled in Real Soon.
 
 ## Versioning policy
 
-We use semantic versioning. Depending on `master` is likely to break your production environment,
-so pick a version explicitly.
+We use semantic versioning. Depending on `master` is likely to break your production environment, so
+pick a version explicitly.
 
 Changes that break your consuming Go code or change how your production environment will work will
-increase the major version number. Updates that add features will increase the minor version
-number. Bug fixes or small tweaks will increase the patch level.
+increase the major version number. Updates that add features will increase the minor version number.
+Bug fixes or small tweaks will increase the patch level.
 
 ## Contribution policy
 

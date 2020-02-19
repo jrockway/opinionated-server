@@ -32,11 +32,10 @@ func runServerTest(ctx context.Context, t *testing.T, test func(t *testing.T, in
 		logOpts.LogMetadata = false
 		logOpts.LogPayloads = false
 	}()
-	web := http.NewServeMux()
-	web.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
-	})
+
+	// Serve the grpc health handler.
+	serviceHooks = []func(s *grpc.Server){func(s *grpc.Server) {}}
+
 	os.Setenv("JAEGER_SAMPLER_TYPE", "const")
 	os.Setenv("JAEGER_SAMPLER_PARAM", "0")
 	if err := setup(); err != nil {
