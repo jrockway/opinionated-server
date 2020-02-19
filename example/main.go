@@ -6,6 +6,7 @@ import (
 
 	"github.com/jrockway/opinionated-server/server"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 type flags struct {
@@ -34,7 +35,9 @@ func main() {
 
 	// Add a gRPC server.  (Commented-out to avoid adding a dependency on protocol buffers to
 	// this project.)
-	// server.AddService(func(s *grpc.Server) { myproto.RegisterMyServer(s, &myImpl) })
+	server.AddService(func(s *grpc.Server) {
+		//myproto.RegisterMyServer(s, &myImpl)
+	})
 
 	// Initialize the loggers, tracers, etc.
 	server.Setup()

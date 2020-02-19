@@ -421,20 +421,32 @@ func listenAndServe(stopCh chan string) error {
 	servers++
 	go func() {
 		zap.L().Info("listening", zap.String("server", "debug"), zap.String("addr", debugListener.Addr().String()))
-		doneCh <- fmt.Errorf("debug server: %v", debugServer.Serve(debugListener))
+		if err := debugServer.Serve(debugListener); err != nil {
+			doneCh <- fmt.Errorf("debug server: %v", err)
+		} else {
+			doneCh <- nil
+		}
 	}()
 	if grpcServer != nil && grpcListener != nil {
 		servers++
 		go func() {
 			zap.L().Info("listening", zap.String("server", "grpc"), zap.String("addr", grpcListener.Addr().String()))
-			doneCh <- fmt.Errorf("grpc server: %v", grpcServer.Serve(grpcListener))
+			if err := grpcServer.Serve(grpcListener); err != nil {
+				doneCh <- fmt.Errorf("grpc server: %v", err)
+			} else {
+				doneCh <- nil
+			}
 		}()
 	}
 	if httpHandler != nil && httpListener != nil {
 		servers++
 		go func() {
 			zap.L().Info("listening", zap.String("server", "http"), zap.String("addr", httpListener.Addr().String()))
-			doneCh <- fmt.Errorf("http server: %v", httpServer.Serve(httpListener))
+			if err := httpServer.Serve(httpListener); err != nil {
+				doneCh <- fmt.Errorf("http server: %v", err)
+			} else {
+				doneCh <- nil
+			}
 		}()
 	}
 
