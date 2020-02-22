@@ -24,6 +24,7 @@ import (
 	"github.com/jessevdk/go-flags"
 	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	"github.com/opentracing/opentracing-go"
+	"github.com/povilasv/prommod"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -48,7 +49,16 @@ type Info struct {
 }
 
 var (
-	AppName         = "server"
+	AppName          = "server"
+	AppVersion       = "unversioned"
+	appVersionMetric = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "app_version",
+			Help: "The version string that was compiled into this app.",
+		},
+		[]string{"name", "version"},
+	)
+
 	flagParser      = flags.NewParser(nil, flags.HelpFlag|flags.PassDoubleDash)
 	logOpts         = &logOptions{}
 	logLevel        zap.AtomicLevel
@@ -103,6 +113,7 @@ func Setup() {
 	}
 	if _, err := flagParser.Parse(); err != nil {
 		if ferr, ok := err.(*flags.Error); ok && ferr.Type == flags.ErrHelp {
+			fmt.Fprintf(os.Stderr, "%s version %s\n", AppName, AppVersion)
 			fmt.Fprintf(os.Stderr, ferr.Message)
 			os.Exit(2)
 		}
@@ -113,6 +124,8 @@ func Setup() {
 	if err := setup(); err != nil {
 		zap.L().Fatal("error initializing app", zap.Error(err))
 	}
+	appVersionMetric.WithLabelValues(AppName, AppVersion).Set(1)
+	prometheus.Register(prommod.NewCollector(AppName))
 }
 
 func maxprocsLogger() maxprocs.Option {
