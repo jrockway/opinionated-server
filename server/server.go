@@ -128,6 +128,7 @@ func Setup() {
 	}
 	appVersionMetric.WithLabelValues(AppName, AppVersion).Set(1)
 	prometheus.Register(prommod.NewCollector(AppName))
+	zap.L().Info("app starting", zap.String("name", AppName), zap.String("version", AppVersion))
 }
 
 func maxprocsLogger() maxprocs.Option {
