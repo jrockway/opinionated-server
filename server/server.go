@@ -34,6 +34,8 @@ import (
 	jprom "github.com/uber/jaeger-lib/metrics/prometheus"
 	"go.uber.org/automaxprocs/maxprocs"
 	"go.uber.org/zap"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
 	channelz "google.golang.org/grpc/channelz/service"
 	"google.golang.org/grpc/health"
@@ -394,8 +396,9 @@ func listenAndServe(stopCh chan string) error {
 	}
 
 	doneCh := make(chan error)
+
 	debugServer := &http.Server{
-		Handler:  nethttp.Middleware(opentracing.GlobalTracer(), instrumentHandler("debug_http", http.DefaultServeMux), nethttp.MWSpanFilter(isNotMonitoring), nethttp.MWComponentName("debug_http")),
+		Handler:  h2c.NewHandler(nethttp.Middleware(opentracing.GlobalTracer(), instrumentHandler("debug_http", http.DefaultServeMux), nethttp.MWSpanFilter(isNotMonitoring), nethttp.MWComponentName("debug_http")), &http2.Server{}),
 		ErrorLog: zap.NewStdLog(zap.L().Named("debug_http")),
 	}
 
@@ -404,7 +407,7 @@ func listenAndServe(stopCh chan string) error {
 		// I'd rather blow up with a null pointer dereference than serve the debug mux on
 		// the main port, which is what happens if httpHandler is nil.
 		httpServer = &http.Server{
-			Handler:  nethttp.Middleware(opentracing.GlobalTracer(), instrumentHandler("http", httpHandler), nethttp.MWComponentName("http")),
+			Handler:  h2c.NewHandler(nethttp.Middleware(opentracing.GlobalTracer(), instrumentHandler("http", httpHandler), nethttp.MWComponentName("http")), &http2.Server{}),
 			ErrorLog: zap.NewStdLog(zap.L().Named("http")),
 		}
 	}
