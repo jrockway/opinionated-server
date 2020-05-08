@@ -70,7 +70,7 @@ var (
 	httpHandler     http.Handler
 	serviceHooks    []func(s *grpc.Server)
 	startupCallback func(Info)
-	drainCh         chan struct{} = nil
+	drainHandlers   []func()
 
 	healthServer     = health.NewServer()
 	debugSetup       = false
@@ -262,20 +262,24 @@ func SetStartupCallback(cb func(Info)) {
 	startupCallback = cb
 }
 
-// Draining returns a context that is closed when the server begins draining.  You can write code
-// like:
+// AddDrainHandler registers a function to be called when the server begins draining.  It is not
+// safe to call while ListenAndServe is running.  If your function blocks, it will interfere with a
+// clean shutdown, so don't block.
 //
-//     select {
-//     case <-server.Draining():
-//             return errors.New("server draining")
-//     case <-ctx.Done():
-//             ...
-//     }
+// To cancel select statements, share a channel between the drain handler and your loop:
 //
-// To abort requests when a shutdown is requested.  You don't have to; you have until the grace
-// period to finish up the request.
-func Draining() chan struct{} {
-	return drainCh
+//	drainCh := make(chan struct{})
+//	server.AddDrainHandler(func() { close(drainCh) })
+//	for {
+//		select {
+//			case <-drainCh:
+//			// draining
+//			case <- whatever:
+//			// whatever
+//		}
+//	}
+func AddDrainHandler(f func()) {
+	drainHandlers = append(drainHandlers, f)
 }
 
 // isNotMonitoring returns true if the request is not monitoring.  (This is to suppress tracing of
@@ -363,7 +367,6 @@ func instrumentHandler(name string, handler http.Handler) http.Handler {
 
 // listenAndSereve starts the server and runs until stopped.
 func listenAndServe(stopCh chan string) error {
-	drainCh = make(chan struct{})
 	wantGrpc := len(serviceHooks) > 0
 
 	debugListener, err := net.Listen("tcp", listenOpts.DebugAddress)
@@ -495,7 +498,9 @@ func listenAndServe(stopCh chan string) error {
 	tctx, c := context.WithTimeout(context.Background(), listenOpts.ShutdownGracePeriod)
 	defer c()
 	healthServer.Shutdown() // nolint
-	close(drainCh)
+	for _, h := range drainHandlers {
+		h()
+	}
 
 	go debugServer.Shutdown(tctx) // nolint
 	if grpcServer != nil {

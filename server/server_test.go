@@ -149,10 +149,14 @@ func TestDrain(t *testing.T) {
 	SetStartupCallback(func(info Info) { infoCh <- info })
 	defer func() { startupCallback = nil }()
 
+	drainCh := make(chan struct{})
+	AddDrainHandler(func() { close(drainCh) })
+	defer func() { drainHandlers = nil }()
+
 	http.HandleFunc("/wait-for-drain", func(w http.ResponseWriter, req *http.Request) {
 		ctx := req.Context()
 		select {
-		case <-Draining():
+		case <-drainCh:
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("draining"))
 		case <-ctx.Done():
