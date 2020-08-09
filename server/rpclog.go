@@ -132,9 +132,10 @@ func logEnd(ctx context.Context, method string, start time.Time, trailers metada
 	if err != nil {
 		// Skip stacktrace here, since it's just to this point and not to the RPC that blew
 		// up.
-		ce := resLogger.Check(zap.ErrorLevel, "grpc call finished with error")
-		ce.Entry.Stack = ""
-		ce.Write()
+		if ce := resLogger.Check(zap.ErrorLevel, "grpc call finished with error"); ce != nil {
+			ce.Entry.Stack = ""
+			ce.Write()
+		}
 	} else if shouldLog(method) {
 		resLogger.Debug("grpc call finished")
 	}
