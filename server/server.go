@@ -16,7 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_zap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
@@ -76,6 +75,17 @@ var (
 	debugSetup       = false
 	tracingSetup     = false
 	grpcLogInstalled = false
+
+	unaryInterceptors = []grpc.UnaryServerInterceptor{
+		otgrpc.OpenTracingServerInterceptor(opentracing.GlobalTracer(), otgrpc.IncludingSpans(shouldTrace)),
+		grpc_prometheus.UnaryServerInterceptor,
+		loggingUnaryServerInterceptor(),
+	}
+	streamInterceptors = []grpc.StreamServerInterceptor{
+		otgrpc.OpenTracingStreamServerInterceptor(opentracing.GlobalTracer(), otgrpc.IncludingSpans(shouldTrace)),
+		grpc_prometheus.StreamServerInterceptor,
+		loggingStreamServerInterceptor(),
+	}
 )
 
 type logOptions struct {
@@ -282,6 +292,16 @@ func AddDrainHandler(f func()) {
 	drainHandlers = append(drainHandlers, f)
 }
 
+// AddUnaryInterceptor adds a grpc unary interceptor to the server.
+func AddUnaryInterceptor(i grpc.UnaryServerInterceptor) {
+	unaryInterceptors = append(unaryInterceptors, i)
+}
+
+// AddStreamInterceptor adds a grpc stream interceptor to the server.
+func AddStreamInterceptor(i grpc.StreamServerInterceptor) {
+	streamInterceptors = append(streamInterceptors, i)
+}
+
 // isNotMonitoring returns true if the request is not monitoring.  (This is to suppress tracing of
 // kubelet health checks and prometheus metric scrapes.)
 func isNotMonitoring(req *http.Request) bool {
@@ -418,18 +438,7 @@ func listenAndServe(stopCh chan string) error {
 
 	var grpcServer *grpc.Server
 	if wantGrpc {
-		grpcServer = grpc.NewServer(
-			grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-				otgrpc.OpenTracingServerInterceptor(opentracing.GlobalTracer(), otgrpc.IncludingSpans(shouldTrace)),
-				grpc_prometheus.UnaryServerInterceptor,
-				loggingUnaryServerInterceptor(),
-			)),
-			grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-				otgrpc.OpenTracingStreamServerInterceptor(opentracing.GlobalTracer(), otgrpc.IncludingSpans(shouldTrace)),
-				grpc_prometheus.StreamServerInterceptor,
-				loggingStreamServerInterceptor(),
-			)),
-		)
+		grpcServer = grpc.NewServer(grpc.ChainUnaryInterceptor(unaryInterceptors...), grpc.ChainStreamInterceptor(streamInterceptors...))
 		grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 		channelz.RegisterChannelzServiceToServer(grpcServer)
 		for _, h := range serviceHooks {
