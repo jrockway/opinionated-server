@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,8 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/protobuf/jsonpb"
-	"github.com/golang/protobuf/proto"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	jaegerzap "github.com/uber/jaeger-client-go/log/zap"
 	"go.uber.org/zap"
@@ -20,13 +19,12 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 // This package logs RPC requests to zap.  Obviously go-grpc-middleware/logging/zap does this, but
 // not as well.
-var (
-	jsonMarshal = &jsonpb.Marshaler{EmitDefaults: true}
-)
 
 // pbw exists to do a better job of marshaling protos to JSON than zap.Reflect does.  It supports
 // google protos and gogo protos because some programs use both.  How fun!
@@ -43,14 +41,19 @@ func (p *pbw) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 		return errors.New("nil pb wrapper")
 	}
 	switch msg := p.msg.(type) {
-	case proto.Message:
-		if text, err := jsonMarshal.MarshalToString(msg); err != nil {
-			return fmt.Errorf("marshal google proto json: %w", err)
-		} else {
-			enc.AddString("msg", text)
-		}
 	case zapcore.ObjectMarshaler:
 		enc.AddObject("msg", msg)
+	case proto.Message:
+		// This code is slow and allocation-heavy, but it yields correct results.
+		m, err := protojson.Marshal(msg)
+		if err != nil {
+			return fmt.Errorf("marshal proto: %w", err)
+		}
+		result := make(map[string]interface{})
+		if err := json.Unmarshal(m, &result); err != nil {
+			return fmt.Errorf("unmarshal proto json into map[string]interface{}: %w", err)
+		}
+		enc.AddReflected("msg", result)
 	default:
 		enc.AddReflected("msg", msg)
 	}
