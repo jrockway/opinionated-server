@@ -1,5 +1,8 @@
 package server
 
+// This package logs RPC requests to zap.  Obviously go-grpc-middleware/logging/zap does this, but
+// not as well.
+
 import (
 	"context"
 	"encoding/json"
@@ -12,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	oldproto "github.com/golang/protobuf/proto"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	jaegerzap "github.com/uber/jaeger-client-go/log/zap"
 	"go.uber.org/zap"
@@ -23,41 +27,29 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// This package logs RPC requests to zap.  Obviously go-grpc-middleware/logging/zap does this, but
-// not as well.
-
-// pbw exists to do a better job of marshaling protos to JSON than zap.Reflect does.  It supports
-// google protos and gogo protos because some programs use both.  How fun!
-//
-// If you are using something like https://github.com/kazegusuri/go-proto-zap-marshaler, we will use
-// those generated methods instead.
 type pbw struct {
-	msg interface{}
+	msg proto.Message
 }
 
-// MarshalLogObject implements zapcore.ObjectMarshaler.
-func (p *pbw) MarshalLogObject(enc zapcore.ObjectEncoder) error {
-	if p == nil {
-		return errors.New("nil pb wrapper")
-	}
-	switch msg := p.msg.(type) {
+func Proto(key string, value interface{}) zap.Field {
+	switch msg := value.(type) {
 	case zapcore.ObjectMarshaler:
-		enc.AddObject("msg", msg)
+		return zap.Object(key, msg)
+	case oldproto.Message:
+		return zap.Any(key, &pbw{oldproto.MessageV2(msg)})
 	case proto.Message:
-		// This code is slow and allocation-heavy, but it yields correct results.
-		m, err := protojson.Marshal(msg)
-		if err != nil {
-			return fmt.Errorf("marshal proto: %w", err)
-		}
-		result := make(map[string]interface{})
-		if err := json.Unmarshal(m, &result); err != nil {
-			return fmt.Errorf("unmarshal proto json into map[string]interface{}: %w", err)
-		}
-		enc.AddReflected("msg", result)
+		return zap.Any(key, &pbw{msg})
 	default:
-		enc.AddReflected("msg", msg)
+		return zap.Any(key, value)
 	}
-	return nil
+}
+
+// MarshalLogObject implements json.Marshaler.
+func (p *pbw) MarshalJSON() ([]byte, error) {
+	if p == nil || p.msg == nil {
+		return []byte("{}"), nil
+	}
+	return json.RawMessage([]byte(protojson.Format(p.msg))), nil
 }
 
 // mdw marshals grpc metadata and http headers.
@@ -114,7 +106,7 @@ func logStart(ctx context.Context, l *zap.Logger, method string, req interface{}
 		reqFields = append(reqFields, zap.Array("grpc.metadata", &mdw{md}))
 	}
 	if logOpts.LogPayloads && req != nil {
-		reqFields = append(reqFields, zap.Object("grpc.request", &pbw{req}))
+		reqFields = append(reqFields, Proto("grpc.request", req))
 	}
 	l.With(reqFields...).Debug("grpc call started")
 }
@@ -129,7 +121,7 @@ func logEnd(ctx context.Context, method string, start time.Time, trailers metada
 		fields = append(fields, zap.Array("grpc.trailers", &mdw{trailers}))
 	}
 	if logOpts.LogPayloads && res != nil {
-		fields = append(fields, zap.Object("grpc.response", &pbw{res}))
+		fields = append(fields, Proto("grpc.response", res))
 	}
 	resLogger := ctxzap.Extract(ctx).With(fields...)
 	if err != nil {
@@ -230,7 +222,7 @@ func (w *wrappedServerStream) SetTrailer(md metadata.MD) {
 func (w *wrappedServerStream) RecvMsg(m interface{}) error {
 	err := w.stream.RecvMsg(m)
 	if w.shouldLog && logOpts.LogPayloads && err == nil {
-		w.l.Debug("grpc call received message", zap.Object("grpc.incoming_msg", &pbw{m}))
+		w.l.Debug("grpc call received message", Proto("grpc.incoming_msg", m))
 	} else if w.shouldLog && err != nil && !errors.Is(err, io.EOF) {
 		w.l.Error("grpc receive message failed", zap.Error(err))
 	}
@@ -241,7 +233,7 @@ func (w *wrappedServerStream) RecvMsg(m interface{}) error {
 // SendMsg implements grpc.ServerStream.
 func (w *wrappedServerStream) SendMsg(m interface{}) error {
 	if w.shouldLog && logOpts.LogPayloads {
-		w.l.Debug("grpc call sent message", zap.Object("grpc.outgoing_msg", &pbw{m}))
+		w.l.Debug("grpc call sent message", Proto("grpc.outgoing_msg", m))
 	}
 	return w.stream.SendMsg(m)
 }
