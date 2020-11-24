@@ -273,18 +273,29 @@ func SetStartupCallback(cb func(Info)) {
 }
 
 // AddDrainHandler registers a function to be called when the server begins draining.  It is not
-// safe to call while ListenAndServe is running.  If your function blocks, it will interfere with a
-// clean shutdown, so don't block.
+// safe to add a drain handler while ListenAndServe is running.
 //
-// To cancel select statements, share a channel between the drain handler and your loop:
+// The provided drain handler will be called while your server is still serving, allowing you to
+// cleanly interrupt long-lived requests.  If your drain handler blocks, it will interfere with a
+// clean shutdown, so don't block.  Your handlers will have the configured grace period to react to
+// the drain event.
 //
-//	drainCh := make(chan struct{})
-//	server.AddDrainHandler(func() { close(drainCh) })
+// To cancel select statements, share a channel between the drain handler and your event loop:
+//
+// 	drainCh := make(chan struct{})
+// 	server.AddDrainHandler(func() { close(drainCh) })
+// 	...
+// 	server.ListenAndServe()
+//
+// Then in some long-lived handler:
+//
 //	for {
 //		select {
-//			case <-drainCh:
-//			// draining
-//			case <- whatever:
+//		case <-drainCh:
+//              	return errors.New("draining")
+//		case <-ctx.Done():
+//              	return ctx.Err()
+//		case <-whatever:
 //			// whatever
 //		}
 //	}
