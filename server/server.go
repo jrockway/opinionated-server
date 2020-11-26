@@ -144,7 +144,7 @@ func Setup() {
 func maxprocsLogger() maxprocs.Option {
 	l := zap.L().Named("maxprocs").WithOptions(zap.AddCallerSkip(1)).Sugar()
 	return maxprocs.Logger(func(msg string, args ...interface{}) {
-		l.Infof(msg, args)
+		l.Infof(msg, args...)
 	})
 }
 
