@@ -7,16 +7,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"path"
-	"sort"
 	"sync"
 	"time"
 
 	oldproto "github.com/golang/protobuf/proto" // nolint
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"github.com/jrockway/opinionated-server/internal/formatters"
 	jaegerzap "github.com/uber/jaeger-client-go/log/zap"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -52,34 +51,6 @@ func (p *pbw) MarshalJSON() ([]byte, error) {
 	return json.RawMessage([]byte(protojson.Format(p.msg))), nil
 }
 
-// mdw marshals grpc metadata and http headers.
-type mdw struct {
-	md map[string][]string
-}
-
-// MarshalLogArray implements zapcore.ArrayMarshaler.
-func (m *mdw) MarshalLogArray(enc zapcore.ArrayEncoder) error {
-	if m == nil {
-		return errors.New("nil metadata.MD wrapper")
-	}
-	if m.md == nil {
-		return errors.New("nil metadata.MD in wrapper")
-	}
-
-	var keys []string
-	for k := range m.md {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	for _, k := range keys {
-		for _, v := range m.md[k] {
-			enc.AppendString(fmt.Sprintf("%s=%s", k, v))
-		}
-	}
-	return nil
-}
-
 func shouldLog(method string) bool {
 	return !suppressInstrumentation(method)
 }
@@ -103,7 +74,7 @@ func logStart(ctx context.Context, l *zap.Logger, method string, req interface{}
 	}
 	var reqFields []zap.Field
 	if md, ok := metadata.FromIncomingContext(ctx); ok && logOpts.LogMetadata {
-		reqFields = append(reqFields, zap.Array("grpc.metadata", &mdw{md}))
+		reqFields = append(reqFields, zap.Array("grpc.metadata", &formatters.MetadataWrapper{MD: md}))
 	}
 	if logOpts.LogPayloads && req != nil {
 		reqFields = append(reqFields, Proto("grpc.request", req))
@@ -118,7 +89,7 @@ func logEnd(ctx context.Context, method string, start time.Time, trailers metada
 		zap.Duration("grpc.duration", time.Since(start)),
 	}
 	if logOpts.LogMetadata && trailers != nil {
-		fields = append(fields, zap.Array("grpc.trailers", &mdw{trailers}))
+		fields = append(fields, zap.Array("grpc.trailers", &formatters.MetadataWrapper{MD: trailers}))
 	}
 	if logOpts.LogPayloads && res != nil {
 		fields = append(fields, Proto("grpc.response", res))
@@ -151,7 +122,11 @@ func loggingUnaryServerInterceptor() grpc.UnaryServerInterceptor {
 func loggingHTTPInterceptor(name string, handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		ctx := req.Context()
-		logger := zap.L().Named(name).With(zap.String("uri", req.URL.String()), jaegerzap.Trace(ctx))
+		logger := zap.L().Named(name).With(
+			jaegerzap.Trace(ctx),
+			zap.String("method", req.Method),
+			zap.String("url", req.URL.String()),
+		)
 
 		logctx := ctxzap.ToContext(ctx, logger)
 		req = req.WithContext(logctx)
@@ -159,7 +134,7 @@ func loggingHTTPInterceptor(name string, handler http.Handler) http.Handler {
 		if isNotMonitoring(req) {
 			reqLogger := logger
 			if logOpts.LogMetadata {
-				reqLogger = logger.With(zap.Array("headers", &mdw{req.Header}))
+				reqLogger = logger.With(zap.Array("headers", &formatters.MetadataWrapper{MD: req.Header}))
 			}
 			reqLogger.Debug("incoming http request")
 		}
@@ -200,7 +175,7 @@ func (w *wrappedServerStream) SendHeader(md metadata.MD) error {
 	if w.shouldLog && logOpts.LogMetadata {
 		w.hMu.Lock()
 		w.header = metadata.Join(w.header, md)
-		w.l.Debug("grpc call sending headers", zap.Array("grpc.headers", &mdw{w.header.Copy()}))
+		w.l.Debug("grpc call sending headers", zap.Array("grpc.headers", &formatters.MetadataWrapper{MD: w.header.Copy()}))
 		w.header = nil
 		w.hMu.Unlock()
 	}

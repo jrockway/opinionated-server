@@ -268,6 +268,7 @@ func setupDebug() {
 }
 
 func setupClient() {
+	client.LogMetadata = logOpts.LogMetadata
 	client.LogPayloads = logOpts.LogPayloads
 	client.ServerSetup = true
 }

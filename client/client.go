@@ -13,6 +13,7 @@ import (
 	grpc_zap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/grpc-ecosystem/grpc-opentracing/go/otgrpc"
+	"github.com/jrockway/opinionated-server/internal/formatters"
 	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
@@ -35,6 +36,7 @@ var (
 
 var (
 	ServerSetup = false
+	LogMetadata = false
 	LogPayloads = false
 )
 
@@ -43,7 +45,11 @@ type loggingTransport struct {
 }
 
 func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	l := zap.L().With(zap.String("method", req.Method), zap.String("url", req.URL.String()))
+	fields := []zap.Field{zap.String("method", req.Method), zap.String("url", req.URL.String())}
+	if LogMetadata {
+		fields = append(fields, zap.Array("headers", &formatters.MetadataWrapper{MD: req.Header}))
+	}
+	l := zap.L().With(fields...)
 	l.Debug("outgoing http request")
 	start := time.Now()
 	res, err := t.underlying.RoundTrip(req)
