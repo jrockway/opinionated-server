@@ -140,6 +140,8 @@ func TestHTTPServer(t *testing.T) {
 }
 
 func TestDrain(t *testing.T) {
+	listenOpts.PreDrainGracePeriod = 100 * time.Millisecond
+	listenOpts.ShutdownGracePeriod = time.Second
 	logOpts.LogMetadata = true
 	logOpts.LogPayloads = true
 	logOpts.LogLevel = "debug"

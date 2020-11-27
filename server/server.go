@@ -119,6 +119,7 @@ type listenOptions struct {
 	HTTPAddress         string        `long:"http_address" description:"address to listen for http requests on" default:"0.0.0.0:8080" env:"HTTP_ADDRESS"`
 	DebugAddress        string        `long:"debug_address" description:"address to listen for debug http requests on" default:"127.0.0.1:8081" env:"DEBUG_ADDRESS"`
 	GRPCAddress         string        `long:"grpc_address" description:"address to listen for grpc requests on" default:"0.0.0.0:9000" env:"GRPC_ADDRESS"`
+	PreDrainGracePeriod time.Duration `long:"predrain_grace_period" description:"how long to wait after receiving an exit signal before draining; used to work around long 'network reprogramming' latency"`
 	ShutdownGracePeriod time.Duration `long:"shutdown_grace_period" description:"how long to wait on draining connections before exiting" default:"30s" env:"SHUTDOWN_GRACE_PERIOD"`
 }
 
@@ -568,7 +569,20 @@ func listenAndServe(stopCh chan string) error {
 		servers--
 		zap.L().Error("server unexpectedly exited", zap.Error(doneErr), zap.Int("servers_remaining", servers))
 	}
+	if t := listenOpts.PreDrainGracePeriod; t > 0 {
+		// The idea here is that when we are sent the termination signal, our service
+		// controller also removes you from its list of healthy backends, and so we stop
+		// receiving new requests.  However, this does not always happen instantly.  This
+		// delay allows us to serve normal traffic (including health checks claiming we're
+		// healthy) for a period of time after we have been removed.  Eventually traffic
+		// volume will trail off as service discovery stops being able to discover us.  Then
+		// we stop accepting connections entirely and allow existing connections to finish
+		// (the graceful drain), and finally shut down.
+		zap.L().Info("sleeping before drain to wait for network reprogramming", zap.Duration("duration", t))
+		time.Sleep(t)
+	}
 
+	zap.L().Info("beginning graceful drain", zap.Duration("duration", listenOpts.ShutdownGracePeriod))
 	tctx, c := context.WithTimeout(context.Background(), listenOpts.ShutdownGracePeriod)
 	defer c()
 	healthServer.Shutdown() // nolint
@@ -587,11 +601,11 @@ func listenAndServe(stopCh chan string) error {
 	for servers > 0 {
 		select {
 		case <-tctx.Done():
-			zap.L().Error("context expired during shutdown", zap.Error(err), zap.Int("servers_remaining", servers))
-			return fmt.Errorf("context expired during shutdown: %w", tctx.Err())
+			zap.L().Error("context expired during graceful drain", zap.Error(err), zap.Int("servers_remaining", servers))
+			return fmt.Errorf("context expired during graceful drain: %w", tctx.Err())
 		case err := <-doneCh:
 			servers--
-			zap.L().Info("server exited during shutdown", zap.Error(err), zap.Int("servers_remaining", servers))
+			zap.L().Info("server exited during graceful drain", zap.Error(err), zap.Int("servers_remaining", servers))
 		}
 	}
 	zap.L().Info("all servers exited")
@@ -604,7 +618,7 @@ var terminationLog = "/dev/termination-log"
 // all servers have exited, we exit the program.
 func ListenAndServe() {
 	stopCh := make(chan string)
-	sigCh := make(chan os.Signal)
+	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		sig := <-sigCh
