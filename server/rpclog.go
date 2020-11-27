@@ -161,7 +161,7 @@ func loggingHttpInterceptor(name string, handler http.Handler) http.Handler {
 			if logOpts.LogMetadata {
 				reqLogger = logger.With(zap.Array("headers", &mdw{req.Header}))
 			}
-			reqLogger.Debug("http request")
+			reqLogger.Debug("incoming http request")
 		}
 
 		handler.ServeHTTP(w, req)
