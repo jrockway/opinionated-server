@@ -16,11 +16,13 @@ import (
 	"syscall"
 	"time"
 
+	grpc_logging "github.com/grpc-ecosystem/go-grpc-middleware/logging"
 	grpc_zap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/grpc-ecosystem/grpc-opentracing/go/otgrpc"
 	"github.com/jessevdk/go-flags"
+	"github.com/jrockway/opinionated-server/client"
 	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	"github.com/opentracing/opentracing-go"
 	"github.com/povilasv/prommod"
@@ -161,6 +163,7 @@ func setup() error {
 	if err := setupTracing(); err != nil {
 		return fmt.Errorf("setup tracing: %w", err)
 	}
+	setupClient()
 	setupDebug()
 	return nil
 }
@@ -246,6 +249,31 @@ func setupDebug() {
 		w.Write([]byte(status.String()))
 	})
 	debugSetup = true
+}
+
+func setupClient() {
+	l := zap.L().Named("grpc_client")
+
+	client.UnaryInterceptors = []grpc.UnaryClientInterceptor{
+		// TODO(jrockway): OpenTracingClientInterceptor unfortunately has a bug that makes
+		// Jaeger print large stack traces for every request.  I think we're the first
+		// people to ever run Jaeger with a logger.
+		//
+		// otgrpc.OpenTracingClientInterceptor(opentracing.GlobalTracer()),
+		grpc_prometheus.UnaryClientInterceptor,
+		// I hate some of the choices grpc_zap makes, but for now, it's OK.
+		grpc_zap.UnaryClientInterceptor(l, grpc_zap.WithCodes(grpc_logging.DefaultErrorToCode), grpc_zap.WithDurationField(grpc_zap.DurationToDurationField)),
+	}
+	client.StreamInterceptors = []grpc.StreamClientInterceptor{
+		//otgrpc.OpenTracingStreamClientInterceptor(opentracing.GlobalTracer()),
+		grpc_prometheus.StreamClientInterceptor,
+		grpc_zap.StreamClientInterceptor(l, grpc_zap.WithCodes(grpc_logging.DefaultErrorToCode), grpc_zap.WithDurationField(grpc_zap.DurationToDurationField)),
+	}
+	decider := func(ctx context.Context, fullMethodName string) bool { return true }
+	if logOpts.LogPayloads {
+		client.UnaryInterceptors = append(client.UnaryInterceptors, grpc_zap.PayloadUnaryClientInterceptor(l, decider))
+		client.StreamInterceptors = append(client.StreamInterceptors, grpc_zap.PayloadStreamClientInterceptor(l, decider))
+	}
 }
 
 // AddService registers a gRPC server to be run by the RPC server.  It is intended to be used like:

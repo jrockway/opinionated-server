@@ -9,6 +9,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 var (
@@ -22,12 +24,37 @@ var (
 	}, []string{"code", "method"})
 )
 
-type transport struct {
+var (
+	// UnaryInterceptors is setup when you call server.Setup()
+	UnaryInterceptors []grpc.UnaryClientInterceptor
+	// StreamInterceptors is setup when you call server.Setup()
+	StreamInterceptors []grpc.StreamClientInterceptor
+)
+
+type loggingTransport struct {
+	underlying http.RoundTripper
+}
+
+func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	l := zap.L().With(zap.String("url", req.URL.String()))
+	l.Debug("outgoing http request")
+	res, err := t.underlying.RoundTrip(req)
+	if err != nil {
+		l.Error("outgoing http request done", zap.Error(err))
+	} else if res != nil {
+		l.Debug("outgoing http request done", zap.Int("status.code", res.StatusCode), zap.String("status", res.Status))
+	} else {
+		l.Error("outgoing http request succeeded, but returned nil response")
+	}
+	return res, err
+}
+
+type tracingTransport struct {
 	underlying http.RoundTripper
 }
 
 // RoundTrip implements http.RoundTripper.
-func (t *transport) RoundTrip(orig *http.Request) (*http.Response, error) {
+func (t *tracingTransport) RoundTrip(orig *http.Request) (*http.Response, error) {
 	req, tr := nethttp.TraceRequest(opentracing.GlobalTracer(), orig)
 	defer tr.Finish()
 	return t.underlying.RoundTrip(req)
@@ -40,10 +67,20 @@ func WrapRoundTripper(rt http.RoundTripper) http.RoundTripper {
 	if rt == nil {
 		rt = &http.Transport{}
 	}
-	return &transport{
+	return &tracingTransport{
 		underlying: promhttp.InstrumentRoundTripperInFlight(inFlightGauge,
 			promhttp.InstrumentRoundTripperCounter(
 				requestCount, &nethttp.Transport{
-					RoundTripper: rt})),
+					RoundTripper: &loggingTransport{
+						underlying: rt,
+					}})),
 	}
+}
+
+// GRPCInterceptors returns interceptors that you should use when dialing a remote gRPC service.  We
+// give you this list instead of a DialOption (or wrap Dial ourselves) so that you don't lose the
+// ability to add your own interceptors.  (grpc.WithChainUnaryInterceptor is the DialOption you're
+// looking for.)
+func GRPCInterceptors() ([]grpc.UnaryClientInterceptor, []grpc.StreamClientInterceptor) {
+	return UnaryInterceptors, StreamInterceptors
 }
