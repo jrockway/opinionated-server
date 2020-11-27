@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/felixge/httpsnoop"
 	oldproto "github.com/golang/protobuf/proto" // nolint
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"github.com/jrockway/opinionated-server/internal/formatters"
@@ -79,7 +80,7 @@ func logStart(ctx context.Context, l *zap.Logger, method string, req interface{}
 	if logOpts.LogPayloads && req != nil {
 		reqFields = append(reqFields, Proto("grpc.request", req))
 	}
-	l.With(reqFields...).Debug("grpc call started")
+	l.With(reqFields...).Debug("incoming grpc call")
 }
 
 func logEnd(ctx context.Context, method string, start time.Time, trailers metadata.MD, res interface{}, err error) {
@@ -98,12 +99,12 @@ func logEnd(ctx context.Context, method string, start time.Time, trailers metada
 	if err != nil {
 		// Skip stacktrace here, since it's just to this point and not to the RPC that blew
 		// up.
-		if ce := resLogger.Check(zap.ErrorLevel, "grpc call finished with error"); ce != nil {
+		if ce := resLogger.Check(zap.ErrorLevel, "incoming grpc call finished with error"); ce != nil {
 			ce.Entry.Stack = ""
 			ce.Write()
 		}
 	} else if shouldLog(method) {
-		resLogger.Debug("grpc call finished")
+		resLogger.Debug("incoming grpc call finished")
 	}
 }
 
@@ -119,6 +120,15 @@ func loggingUnaryServerInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
+type incomingHTTPState struct {
+	sync.Mutex
+	code    int
+	n       int
+	log     bool
+	start   time.Time
+	headers http.Header
+}
+
 func loggingHTTPInterceptor(name string, handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		ctx := req.Context()
@@ -131,16 +141,56 @@ func loggingHTTPInterceptor(name string, handler http.Handler) http.Handler {
 		logctx := ctxzap.ToContext(ctx, logger)
 		req = req.WithContext(logctx)
 
-		if isNotMonitoring(req) {
+		st := new(incomingHTTPState)
+		st.start = time.Now()
+		st.log = isNotMonitoring(req)
+		st.headers = http.Header{}
+		if st.log {
 			reqLogger := logger
 			if logOpts.LogMetadata {
-				reqLogger = logger.With(zap.Array("headers", &formatters.MetadataWrapper{MD: req.Header}))
+				reqLogger = logger.With(zap.Array("request.headers", &formatters.MetadataWrapper{MD: req.Header}))
 			}
 			reqLogger.Debug("incoming http request")
+			w = httpsnoop.Wrap(w, httpsnoop.Hooks{
+				Header: func(next httpsnoop.HeaderFunc) httpsnoop.HeaderFunc {
+					return func() http.Header {
+						headers := next()
+						st.Lock()
+						st.headers = headers
+						st.Unlock()
+						return headers
+					}
+				},
+				WriteHeader: func(next httpsnoop.WriteHeaderFunc) httpsnoop.WriteHeaderFunc {
+					return func(code int) {
+						st.Lock()
+						st.code = code
+						st.Unlock()
+						next(code)
+					}
+				},
+				Write: func(next httpsnoop.WriteFunc) httpsnoop.WriteFunc {
+					return func(b []byte) (int, error) {
+						n, err := next(b)
+						st.Lock()
+						st.n += n
+						st.Unlock()
+						return n, err
+					}
+				},
+			})
 		}
 
 		handler.ServeHTTP(w, req)
-		// TODO(jrockway): wrap the requestwriter to print the status here
+		st.Lock()
+		defer st.Unlock()
+		if st.log {
+			fields := []zap.Field{zap.Int("code", st.code), zap.Duration("duration", time.Since(st.start))}
+			if logOpts.LogMetadata {
+				fields = append(fields, zap.Array("response.headers", &formatters.MetadataWrapper{MD: st.headers}))
+			}
+			logger.Debug("incoming http request finished", fields...)
+		}
 	})
 }
 
@@ -175,7 +225,7 @@ func (w *wrappedServerStream) SendHeader(md metadata.MD) error {
 	if w.shouldLog && logOpts.LogMetadata {
 		w.hMu.Lock()
 		w.header = metadata.Join(w.header, md)
-		w.l.Debug("grpc call sending headers", zap.Array("grpc.headers", &formatters.MetadataWrapper{MD: w.header.Copy()}))
+		w.l.Debug("incoming grpc call sending headers", zap.Array("grpc.headers", &formatters.MetadataWrapper{MD: w.header.Copy()}))
 		w.header = nil
 		w.hMu.Unlock()
 	}
@@ -197,9 +247,9 @@ func (w *wrappedServerStream) SetTrailer(md metadata.MD) {
 func (w *wrappedServerStream) RecvMsg(m interface{}) error {
 	err := w.stream.RecvMsg(m)
 	if w.shouldLog && logOpts.LogPayloads && err == nil {
-		w.l.Debug("grpc call received message", Proto("grpc.incoming_msg", m))
+		w.l.Debug("incoming grpc call received message", Proto("grpc.incoming_msg", m))
 	} else if w.shouldLog && err != nil && !errors.Is(err, io.EOF) {
-		w.l.Error("grpc receive message failed", zap.Error(err))
+		w.l.Error("incoming grpc receive message failed", zap.Error(err))
 	}
 	return err
 }
@@ -207,7 +257,7 @@ func (w *wrappedServerStream) RecvMsg(m interface{}) error {
 // SendMsg implements grpc.ServerStream.
 func (w *wrappedServerStream) SendMsg(m interface{}) error {
 	if w.shouldLog && logOpts.LogPayloads {
-		w.l.Debug("grpc call sent message", Proto("grpc.outgoing_msg", m))
+		w.l.Debug("incoming grpc call sent message", Proto("grpc.outgoing_msg", m))
 	}
 	return w.stream.SendMsg(m)
 }

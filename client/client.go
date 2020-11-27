@@ -6,6 +6,7 @@ package client
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"time"
 
@@ -44,23 +45,55 @@ type loggingTransport struct {
 	underlying http.RoundTripper
 }
 
-func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	fields := []zap.Field{zap.String("method", req.Method), zap.String("url", req.URL.String())}
-	if LogMetadata {
-		fields = append(fields, zap.Array("headers", &formatters.MetadataWrapper{MD: req.Header}))
+type closeTracker struct {
+	io.ReadCloser
+	start  time.Time
+	logger *zap.Logger
+	res    *http.Response
+	err    error
+}
+
+func (c *closeTracker) Close() error {
+	l := c.logger.With(zap.Duration("duration", time.Since(c.start)))
+	var closeErr error
+	if c.ReadCloser != nil {
+		if err := c.ReadCloser.Close(); err != nil {
+			closeErr = err
+			l = l.With(zap.NamedError("close_error", err))
+		}
 	}
-	l := zap.L().With(fields...)
-	l.Debug("outgoing http request")
-	start := time.Now()
-	res, err := t.underlying.RoundTrip(req)
-	l = l.With(zap.Duration("duration", time.Since(start)))
+	if LogMetadata && c.res != nil && c.res.Header != nil {
+		l = l.With(zap.Array("response.headers", &formatters.MetadataWrapper{MD: c.res.Header}))
+	}
 	switch {
-	case err != nil:
-		l.Error("outgoing http request done", zap.Error(err))
-	case res != nil:
-		l.Debug("outgoing http request done", zap.Int("status.code", res.StatusCode), zap.String("status", res.Status))
+	case c.err != nil:
+		l.Error("outgoing http request finished with error", zap.Error(c.err))
+	case c.res != nil:
+		l.Debug("outgoing http request finished", zap.Int("code", c.res.StatusCode), zap.String("status", c.res.Status))
 	default:
 		l.Error("outgoing http request succeeded, but returned nil response")
+	}
+	return closeErr
+}
+
+func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	l := zap.L().With(zap.String("method", req.Method), zap.String("url", req.URL.String()))
+	reqLogger := l
+	if LogMetadata {
+		reqLogger = l.With(zap.Array("request.headers", &formatters.MetadataWrapper{MD: req.Header}))
+	}
+	reqLogger.Debug("outgoing http request")
+	ct := &closeTracker{
+		start:  time.Now(),
+		logger: l,
+	}
+	res, err := t.underlying.RoundTrip(req)
+	ct.ReadCloser = res.Body
+	res.Body = ct
+	ct.res = res
+	ct.err = err
+	if req.Method == "HEAD" {
+		ct.Close()
 	}
 	return res, err
 }

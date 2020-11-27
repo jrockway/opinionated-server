@@ -354,7 +354,7 @@ func isNotMonitoring(req *http.Request) bool {
 	if strings.HasPrefix(req.Header.Get("User-Agent"), "kube-probe/") {
 		return false
 	}
-	if req.URL != nil && req.URL.Path == "/metrics" {
+	if req.URL != nil && (req.URL.Path == "/metrics" || req.URL.Path == "/healthz") {
 		return false
 	}
 	return true
