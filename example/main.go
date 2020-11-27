@@ -36,6 +36,7 @@ func main() {
 	// Add a gRPC server.  (Commented-out to avoid adding a dependency on protocol buffers to
 	// this project.)
 	server.AddService(func(s *grpc.Server) {
+		// nolint
 		// myproto.RegisterMyServer(s, &myImpl)
 	})
 

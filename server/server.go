@@ -422,7 +422,7 @@ func instrumentHandler(name string, handler http.Handler) http.Handler {
 			promhttp.InstrumentHandlerCounter(httpCounter.MustCurryWith(l),
 				promhttp.InstrumentHandlerRequestSize(httpRequestSize.MustCurryWith(l),
 					promhttp.InstrumentHandlerResponseSize(httpResponseSize.MustCurryWith(l),
-						loggingHttpInterceptor(name, handler),
+						loggingHTTPInterceptor(name, handler),
 					),
 				),
 			),

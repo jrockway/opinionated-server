@@ -181,7 +181,7 @@ func TestDrain(t *testing.T) {
 	time.AfterFunc(200*time.Millisecond, func() { killCh <- "force drain" })
 
 	httpClient := &http.Client{Transport: client.WrapRoundTripper(http.DefaultTransport)}
-	req, err := http.NewRequest("GET", "http://"+info.DebugAddress+"/wait-for-drain", nil)
+	req, err := http.NewRequestWithContext(context.TODO(), "GET", "http://"+info.DebugAddress+"/wait-for-drain", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	oldproto "github.com/golang/protobuf/proto"
+	oldproto "github.com/golang/protobuf/proto" // nolint
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	jaegerzap "github.com/uber/jaeger-client-go/log/zap"
 	"go.uber.org/zap"
@@ -148,7 +148,7 @@ func loggingUnaryServerInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
-func loggingHttpInterceptor(name string, handler http.Handler) http.Handler {
+func loggingHTTPInterceptor(name string, handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		ctx := req.Context()
 		logger := zap.L().Named(name).With(zap.String("uri", req.URL.String()), jaegerzap.Trace(ctx))
