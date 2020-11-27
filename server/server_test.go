@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jrockway/opinionated-server/client"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
@@ -78,7 +79,8 @@ func TestDefaultServers(t *testing.T) {
 	ctx, c := context.WithTimeout(context.Background(), 5*time.Second)
 	defer c()
 	runServerTest(ctx, t, func(t *testing.T, info Info) {
-		conn, err := grpc.DialContext(ctx, info.GRPCAddress, grpc.WithBlock(), grpc.WithInsecure())
+		unaryI, streamI := client.GRPCInterceptors()
+		conn, err := grpc.DialContext(ctx, info.GRPCAddress, grpc.WithBlock(), grpc.WithInsecure(), grpc.WithChainUnaryInterceptor(unaryI...), grpc.WithChainStreamInterceptor(streamI...))
 		if err != nil {
 			t.Fatalf("dial grpc %q: %v", info.GRPCAddress, err)
 		}
@@ -86,12 +88,13 @@ func TestDefaultServers(t *testing.T) {
 			t.Errorf("grpc endpoint unhealthy: %v", err)
 		}
 
+		httpClient := &http.Client{Transport: client.WrapRoundTripper(http.DefaultTransport)}
 		req, err := http.NewRequest("get", "http://"+info.DebugAddress+"/metrics", nil)
 		if err != nil {
 			t.Fatalf("new debug request: %v", err)
 		}
 		req = req.WithContext(ctx)
-		res, err := http.DefaultClient.Do(req)
+		res, err := httpClient.Do(req)
 		if err != nil {
 			t.Fatalf("request /metrics: %v", err)
 		}
@@ -119,12 +122,13 @@ func TestHTTPServer(t *testing.T) {
 	ctx, c := context.WithTimeout(context.Background(), 5*time.Second)
 	defer c()
 	runServerTest(ctx, t, func(t *testing.T, info Info) {
+		httpClient := &http.Client{Transport: client.WrapRoundTripper(http.DefaultTransport)}
 		req, err := http.NewRequest("get", "http://"+info.HTTPAddress+"/", nil)
 		if err != nil {
 			t.Fatalf("new http request: %v", err)
 		}
 		req = req.WithContext(ctx)
-		res, err := http.DefaultClient.Do(req)
+		res, err := httpClient.Do(req)
 		if err != nil {
 			t.Fatalf("request /: %v", err)
 		}
@@ -142,7 +146,6 @@ func TestDrain(t *testing.T) {
 	defer func() {
 		logOpts.LogMetadata = false
 		logOpts.LogPayloads = false
-
 	}()
 
 	infoCh := make(chan Info)
@@ -176,10 +179,17 @@ func TestDrain(t *testing.T) {
 		close(infoCh)
 	}
 	time.AfterFunc(200*time.Millisecond, func() { killCh <- "force drain" })
-	res, err := http.Get("http://" + info.DebugAddress + "/wait-for-drain")
+
+	httpClient := &http.Client{Transport: client.WrapRoundTripper(http.DefaultTransport)}
+	req, err := http.NewRequest("GET", "http://"+info.DebugAddress+"/wait-for-drain", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	res, err := httpClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
 	if got, want := res.StatusCode, http.StatusOK; got != want {
 		t.Errorf("get /wait-for-drain: response status:\n  got: %v\n want: %v", got, want)
 	}

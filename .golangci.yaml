@@ -1,23 +1,16 @@
+run:
+    modules-download-mode: readonly
 linters-settings:
-    govet:
-        check-shadowing: false # kind of broken with error-handling
-    golint:
-        min-confidence: 0
-    gocyclo:
-        min-complexity: 20
-    maligned:
-        suggest-new: true
-    dupl:
-        threshold: 150
-    goconst:
-        min-len: 3
-        min-occurrences: 3
-    depguard:
-        list-type: blacklist
-        packages: {}
-        packages-with-error-messages: {}
-    misspell:
-        locale: US
+    gofmt:
+        simplify: true
+    errcheck:
+        check-type-assertions: true
+        check-blank: true
+        ignore: fmt:.*,io/ioutil:^Read.*
+    exhaustive:
+        default-signifies-exhaustive: true
+    nolintlint:
+        allow-unused: true
     gocritic:
         enabled-tags:
             - diagnostic
@@ -25,46 +18,46 @@ linters-settings:
             - opinionated
             - performance
             - style
-    funlen:
-        lines: 200
-        statements: 100
-    errcheck:
-        check-type-assertions: true
-        check-blank: true
-        exclude: .errcheck.txt
-
+        disabled-checks:
+            - dupImport # https://github.com/go-critic/go-critic/issues/845
+            - ifElseChain
+            - octalLiteral
+            - whyNoLint
+            - wrapperFunc
+            - unnamedResult
+            - rangeValCopy # k8s api forces us to do this
 linters:
-    # please, do not use `enable-all`: it's deprecated and will be removed soon.
-    # inverted configuration with `enable-all` and `disable` is not scalable during updates of golangci-lint
-    disable-all: true
     enable:
-        - govet
-        - errcheck
-        - staticcheck
-        - unused
-        - gosimple
-        - structcheck
-        - varcheck
-        - ineffassign
-        - deadcode
-        - typecheck
+        - asciicheck
         - bodyclose
-        - golint
-        - stylecheck
-        - gosec
-        - interfacer
-        - unconvert
-        - dupl
-        - goconst
-        - gocyclo
-        - gofmt
-        - maligned
-        - depguard
-        - misspell
-        - unparam
-        - nakedret
-        - scopelint
+        - deadcode
+        - dogsled
+        # - dupl
+        # - errcheck
+        - exhaustive
+        - exportloopref
         - gocritic
-        - godox
-        - funlen
+        - gofmt
+        - golint
+        - goprintffuncname
+        - gosimple
+        - govet
+        - ineffassign
+        - megacheck
+        - misspell
+        - nakedret
+        - noctx
+        - nolintlint
+        - nolintlint
+        - rowserrcheck
+        - sqlclosecheck
+        - staticcheck
+        - structcheck
+        - stylecheck
+        - typecheck
+        - unparam
+        - unused
+        - varcheck
         - whitespace
+    disable-all: true
+    fast: false

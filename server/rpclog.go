@@ -227,7 +227,6 @@ func (w *wrappedServerStream) RecvMsg(m interface{}) error {
 		w.l.Error("grpc receive message failed", zap.Error(err))
 	}
 	return err
-
 }
 
 // SendMsg implements grpc.ServerStream.

@@ -92,8 +92,8 @@ var (
 
 type logOptions struct {
 	LogLevel       string `long:"log_level" description:"zap level to log at" default:"debug" env:"LOG_LEVEL"`
-	DevelopmentLog bool   `long:"pretty_logs" description:"use the nicer-to-look at development log" env:"PRETTY_LOGS"`
 	GRPCVerbosity  int    `long:"grpc_verbosity" description:"verbosity level of grpc logs" default:"0" env:"GRPC_GO_LOG_VERBOSITY_LEVEL"`
+	DevelopmentLog bool   `long:"pretty_logs" description:"use the nicer-to-look at development log" env:"PRETTY_LOGS"`
 
 	LogMetadata bool `long:"log_metadata" description:"log headers/metadata for each http or grpc request" env:"LOG_METADATA"`
 	LogPayloads bool `long:"log_payloads" description:"log requests and responses for each http or grpc request; if true, payloads are logged to the logger and reported to jaeger" env:"LOG_PAYLOADS"`

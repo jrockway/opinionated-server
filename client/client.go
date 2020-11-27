@@ -3,6 +3,7 @@ package client
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	"github.com/opentracing/opentracing-go"
@@ -36,14 +37,17 @@ type loggingTransport struct {
 }
 
 func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	l := zap.L().With(zap.String("url", req.URL.String()))
+	l := zap.L().With(zap.String("method", req.Method), zap.String("url", req.URL.String()))
 	l.Debug("outgoing http request")
+	start := time.Now()
 	res, err := t.underlying.RoundTrip(req)
-	if err != nil {
+	l = l.With(zap.Duration("duration", time.Since(start)))
+	switch {
+	case err != nil:
 		l.Error("outgoing http request done", zap.Error(err))
-	} else if res != nil {
+	case res != nil:
 		l.Debug("outgoing http request done", zap.Int("status.code", res.StatusCode), zap.String("status", res.Status))
-	} else {
+	default:
 		l.Error("outgoing http request succeeded, but returned nil response")
 	}
 	return res, err

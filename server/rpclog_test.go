@@ -71,5 +71,4 @@ func TestStreamWrapper(t *testing.T) {
 	if got, want := wrapped.trailer, (metadata.MD{"baz": []string{"quux"}}); !reflect.DeepEqual(got, want) {
 		t.Errorf("captured trailers:\n  got: %#v\n want: %#v", got, want)
 	}
-
 }
