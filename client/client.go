@@ -1,10 +1,18 @@
 // Package client adds some goodies for clients inside opinionated-server servers.
+//
+// Nothing here should be called until server.Setup() has been run; we depend on the global tracer
+// and global logger which are setup there.
 package client
 
 import (
+	"context"
 	"net/http"
 	"time"
 
+	grpc_logging "github.com/grpc-ecosystem/go-grpc-middleware/logging"
+	grpc_zap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
+	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/grpc-ecosystem/grpc-opentracing/go/otgrpc"
 	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
@@ -26,10 +34,8 @@ var (
 )
 
 var (
-	// UnaryInterceptors is setup when you call server.Setup()
-	UnaryInterceptors []grpc.UnaryClientInterceptor
-	// StreamInterceptors is setup when you call server.Setup()
-	StreamInterceptors []grpc.StreamClientInterceptor
+	ServerSetup = false
+	LogPayloads = false
 )
 
 type loggingTransport struct {
@@ -81,10 +87,35 @@ func WrapRoundTripper(rt http.RoundTripper) http.RoundTripper {
 	}
 }
 
-// GRPCInterceptors returns interceptors that you should use when dialing a remote gRPC service.  We
-// give you this list instead of a DialOption (or wrap Dial ourselves) so that you don't lose the
-// ability to add your own interceptors.  (grpc.WithChainUnaryInterceptor is the DialOption you're
-// looking for.)
+// GRPCInterceptors returns interceptors that you should use when dialing a remote gRPC service,
+// including instrumentation to log each request and propagate tracing information upstream.  Only
+// call this after server.Setup() has been run; we rely on the global logger and global tracer setup
+// there.
+//
+// We give you this list instead of a DialOption (or wrap Dial ourselves) so that you don't lose the
+// ability to add your own interceptors.  (grpc.WithChainUnaryInterceptor will let you pass a list
+// of interceptors to Dial.)
 func GRPCInterceptors() ([]grpc.UnaryClientInterceptor, []grpc.StreamClientInterceptor) {
-	return UnaryInterceptors, StreamInterceptors
+	if !ServerSetup {
+		panic("server has not been setup with server.Setup(); call that first")
+	}
+
+	l := zap.L().Named("grpc_client")
+	unary := []grpc.UnaryClientInterceptor{
+		otgrpc.OpenTracingClientInterceptor(opentracing.GlobalTracer()),
+		grpc_prometheus.UnaryClientInterceptor,
+		// I hate some of the choices grpc_zap makes, but for now, it's OK.
+		grpc_zap.UnaryClientInterceptor(l, grpc_zap.WithCodes(grpc_logging.DefaultErrorToCode), grpc_zap.WithDurationField(grpc_zap.DurationToDurationField)),
+	}
+	stream := []grpc.StreamClientInterceptor{
+		otgrpc.OpenTracingStreamClientInterceptor(opentracing.GlobalTracer()),
+		grpc_prometheus.StreamClientInterceptor,
+		grpc_zap.StreamClientInterceptor(l, grpc_zap.WithCodes(grpc_logging.DefaultErrorToCode), grpc_zap.WithDurationField(grpc_zap.DurationToDurationField)),
+	}
+	decider := func(ctx context.Context, fullMethodName string) bool { return true }
+	if LogPayloads {
+		unary = append(unary, grpc_zap.PayloadUnaryClientInterceptor(l, decider))
+		stream = append(stream, grpc_zap.PayloadStreamClientInterceptor(l, decider))
+	}
+	return unary, stream
 }

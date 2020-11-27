@@ -16,7 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	grpc_logging "github.com/grpc-ecosystem/go-grpc-middleware/logging"
 	grpc_zap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
@@ -51,6 +50,13 @@ type Info struct {
 	HTTPAddress, DebugAddress, GRPCAddress string
 }
 
+// InterceptorContext is some state passed to interceptor creation functions registered with
+// AddUnaryInterceptorFn and AddStreamInterceptorFn.
+type InterceptorContext struct {
+	Tracer opentracing.Tracer // The opentracing tracer to be used to trace requests.
+	Logger *zap.Logger        // The Zap logger to be used for trace information.  It will never be nil.
+}
+
 var (
 	AppName          = "server"
 	AppVersion       = "unversioned"
@@ -78,15 +84,25 @@ var (
 	tracingSetup     = false
 	grpcLogInstalled = false
 
-	unaryInterceptors = []grpc.UnaryServerInterceptor{
-		otgrpc.OpenTracingServerInterceptor(opentracing.GlobalTracer(), otgrpc.IncludingSpans(shouldTrace)),
-		grpc_prometheus.UnaryServerInterceptor,
-		loggingUnaryServerInterceptor(),
+	// Interceptors we'd like to add.  We defer evaluation until starting the server, because
+	// things like opentracing.GlobalTracer() will be incorrect until then.
+	unaryInterceptorFns = []func(ic *InterceptorContext) grpc.UnaryServerInterceptor{
+		func(ic *InterceptorContext) grpc.UnaryServerInterceptor {
+			return otgrpc.OpenTracingServerInterceptor(ic.Tracer, otgrpc.IncludingSpans(shouldTrace))
+		},
+		func(ic *InterceptorContext) grpc.UnaryServerInterceptor {
+			return grpc_prometheus.UnaryServerInterceptor
+		},
+		func(ic *InterceptorContext) grpc.UnaryServerInterceptor { return loggingUnaryServerInterceptor() },
 	}
-	streamInterceptors = []grpc.StreamServerInterceptor{
-		otgrpc.OpenTracingStreamServerInterceptor(opentracing.GlobalTracer(), otgrpc.IncludingSpans(shouldTrace)),
-		grpc_prometheus.StreamServerInterceptor,
-		loggingStreamServerInterceptor(),
+	streamInterceptorFns = []func(ic *InterceptorContext) grpc.StreamServerInterceptor{
+		func(ic *InterceptorContext) grpc.StreamServerInterceptor {
+			return otgrpc.OpenTracingStreamServerInterceptor(ic.Tracer, otgrpc.IncludingSpans(shouldTrace))
+		},
+		func(ic *InterceptorContext) grpc.StreamServerInterceptor {
+			return grpc_prometheus.StreamServerInterceptor
+		},
+		func(ic *InterceptorContext) grpc.StreamServerInterceptor { return loggingStreamServerInterceptor() },
 	}
 )
 
@@ -163,8 +179,8 @@ func setup() error {
 	if err := setupTracing(); err != nil {
 		return fmt.Errorf("setup tracing: %w", err)
 	}
-	setupClient()
 	setupDebug()
+	setupClient()
 	return nil
 }
 
@@ -252,33 +268,13 @@ func setupDebug() {
 }
 
 func setupClient() {
-	l := zap.L().Named("grpc_client")
-
-	client.UnaryInterceptors = []grpc.UnaryClientInterceptor{
-		// TODO(jrockway): OpenTracingClientInterceptor unfortunately has a bug that makes
-		// Jaeger print large stack traces for every request.  I think we're the first
-		// people to ever run Jaeger with a logger.
-		//
-		// otgrpc.OpenTracingClientInterceptor(opentracing.GlobalTracer()),
-		grpc_prometheus.UnaryClientInterceptor,
-		// I hate some of the choices grpc_zap makes, but for now, it's OK.
-		grpc_zap.UnaryClientInterceptor(l, grpc_zap.WithCodes(grpc_logging.DefaultErrorToCode), grpc_zap.WithDurationField(grpc_zap.DurationToDurationField)),
-	}
-	client.StreamInterceptors = []grpc.StreamClientInterceptor{
-		//otgrpc.OpenTracingStreamClientInterceptor(opentracing.GlobalTracer()),
-		grpc_prometheus.StreamClientInterceptor,
-		grpc_zap.StreamClientInterceptor(l, grpc_zap.WithCodes(grpc_logging.DefaultErrorToCode), grpc_zap.WithDurationField(grpc_zap.DurationToDurationField)),
-	}
-	decider := func(ctx context.Context, fullMethodName string) bool { return true }
-	if logOpts.LogPayloads {
-		client.UnaryInterceptors = append(client.UnaryInterceptors, grpc_zap.PayloadUnaryClientInterceptor(l, decider))
-		client.StreamInterceptors = append(client.StreamInterceptors, grpc_zap.PayloadStreamClientInterceptor(l, decider))
-	}
+	client.LogPayloads = logOpts.LogPayloads
+	client.ServerSetup = true
 }
 
 // AddService registers a gRPC server to be run by the RPC server.  It is intended to be used like:
 //
-//   d.AddService(func (s *grpc.Server) { my_proto.RegisterMyServer(s, myImplementation) })
+//   server.AddService(func (s *grpc.Server) { my_proto.RegisterMyService(s, myImplementation) })
 func AddService(cb func(s *grpc.Server)) {
 	serviceHooks = append(serviceHooks, cb)
 }
@@ -331,14 +327,24 @@ func AddDrainHandler(f func()) {
 	drainHandlers = append(drainHandlers, f)
 }
 
+// AddUnaryInterceptorFn adds a unary interceptor, computed by f at server startup time, to the server.
+func AddUnaryInterceptorFn(f func(ic *InterceptorContext) grpc.UnaryServerInterceptor) {
+	unaryInterceptorFns = append(unaryInterceptorFns, f)
+}
+
 // AddUnaryInterceptor adds a grpc unary interceptor to the server.
 func AddUnaryInterceptor(i grpc.UnaryServerInterceptor) {
-	unaryInterceptors = append(unaryInterceptors, i)
+	AddUnaryInterceptorFn(func(ic *InterceptorContext) grpc.UnaryServerInterceptor { return i })
+}
+
+// AddStreamInterceptorFn adds a stream interceptor, computed by f at server startup time, to the server.
+func AddStreamInterceptorFn(f func(ic *InterceptorContext) grpc.StreamServerInterceptor) {
+	streamInterceptorFns = append(streamInterceptorFns, f)
 }
 
 // AddStreamInterceptor adds a grpc stream interceptor to the server.
 func AddStreamInterceptor(i grpc.StreamServerInterceptor) {
-	streamInterceptors = append(streamInterceptors, i)
+	AddStreamInterceptorFn(func(ic *InterceptorContext) grpc.StreamServerInterceptor { return i })
 }
 
 // isNotMonitoring returns true if the request is not monitoring.  (This is to suppress tracing of
@@ -477,7 +483,26 @@ func listenAndServe(stopCh chan string) error {
 
 	var grpcServer *grpc.Server
 	if wantGrpc {
-		grpcServer = grpc.NewServer(grpc.ChainUnaryInterceptor(unaryInterceptors...), grpc.ChainStreamInterceptor(streamInterceptors...))
+		interceptorCtx := &InterceptorContext{
+			Tracer: opentracing.GlobalTracer(),
+			Logger: zap.L(),
+		}
+		var opts []grpc.ServerOption
+		var unaryInterceptors []grpc.UnaryServerInterceptor
+		for _, f := range unaryInterceptorFns {
+			unaryInterceptors = append(unaryInterceptors, f(interceptorCtx))
+		}
+		if len(unaryInterceptors) > 0 {
+			opts = append(opts, grpc.ChainUnaryInterceptor(unaryInterceptors...))
+		}
+		var streamInterceptors []grpc.StreamServerInterceptor
+		for _, f := range streamInterceptorFns {
+			streamInterceptors = append(streamInterceptors, f(interceptorCtx))
+		}
+		if len(streamInterceptors) > 0 {
+			opts = append(opts, grpc.ChainStreamInterceptor(streamInterceptors...))
+		}
+		grpcServer = grpc.NewServer(opts...)
 		grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 		channelz.RegisterChannelzServiceToServer(grpcServer)
 		for _, h := range serviceHooks {
