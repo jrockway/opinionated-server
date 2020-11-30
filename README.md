@@ -1,6 +1,7 @@
 # opinionated-server
 
 ![CI](https://ci.jrock.us/api/v1/teams/main/pipelines/opinionated-server/jobs/tests/badge)
+[![PkgGoDev](https://pkg.go.dev/badge/github.com/jrockway/opinionated-server)](https://pkg.go.dev/github.com/jrockway/opinionated-server)
 
 Every time I need a quick gRPC or HTTP server I end up spending three hours hooking in all the
 little additions I want. This package represents my opinion on what this server should always look
