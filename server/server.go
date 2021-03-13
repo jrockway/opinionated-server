@@ -615,7 +615,7 @@ func listenAndServe(stopCh chan string) error {
 var terminationLog = "/dev/termination-log"
 
 // ListenAndServe starts all servers.  SIGTERM or SIGINT will gracefully drain connections.  When
-// all servers have exited, we exit the program.
+// all servers have exited, this returns.  It is not safe to call ListenAndServe again.
 func ListenAndServe() {
 	stopCh := make(chan string)
 	sigCh := make(chan os.Signal, 1)
@@ -644,6 +644,5 @@ func ListenAndServe() {
 		flushTraces.Close()
 	}
 	zap.L().Sync()
-	restoreLogger()
-	os.Exit(0)
+	restoreLogger() // This is why we don't allow ListenAndServe to run twice.  It could probably be fixed.
 }
