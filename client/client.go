@@ -88,11 +88,14 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		logger: l,
 	}
 	res, err := t.underlying.RoundTrip(req)
-	ct.ReadCloser = res.Body
-	res.Body = ct
 	ct.res = res
 	ct.err = err
-	if req.Method == "HEAD" {
+	if res != nil {
+		ct.ReadCloser = res.Body
+		res.Body = ct
+	}
+
+	if req.Method == "HEAD" || res == nil {
 		ct.Close()
 	}
 	return res, err
