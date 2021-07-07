@@ -7,6 +7,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest"
 )
 
 type boringRoundTripper struct {
@@ -36,6 +40,8 @@ func (rt *boringRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 }
 
 func TestWrapRoundTripper(t *testing.T) {
+	l := zaptest.NewLogger(t, zaptest.Level(zapcore.DebugLevel))
+	zap.ReplaceGlobals(l)
 	brt := &boringRoundTripper{}
 	req := httptest.NewRequest("GET", "https://example.com/", nil)
 
@@ -62,8 +68,11 @@ func TestWrapRoundTripper(t *testing.T) {
 	if got, want := res.StatusCode, http.StatusOK; got != want {
 		t.Errorf("wrapped roundtripper: HEAD: status:\n  got %v\n want: %v", got, want)
 	}
+	res.Body.Close()
 
-	if _, err := wrapped.RoundTrip(httptest.NewRequest("PUT", "https://example.com", strings.NewReader("hi"))); err == nil {
+	res, err := wrapped.RoundTrip(httptest.NewRequest("PUT", "https://example.com", strings.NewReader("hi")))
+	if err == nil {
 		t.Errorf("expected error when calling PUT")
+		res.Body.Close()
 	}
 }
