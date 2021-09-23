@@ -569,15 +569,17 @@ func listenAndServe(stopCh chan string) error {
 		servers--
 		zap.L().Error("server unexpectedly exited", zap.Error(doneErr), zap.Int("servers_remaining", servers))
 	}
+
+	zap.L().Info("marking server unhealthy")
+	healthServer.Shutdown() // nolint
 	if t := listenOpts.PreDrainGracePeriod; t > 0 {
 		// The idea here is that when we are sent the termination signal, our service
 		// controller also removes you from its list of healthy backends, and so we stop
 		// receiving new requests.  However, this does not always happen instantly.  This
-		// delay allows us to serve normal traffic (including health checks claiming we're
-		// healthy) for a period of time after we have been removed.  Eventually traffic
-		// volume will trail off as service discovery stops being able to discover us.  Then
-		// we stop accepting connections entirely and allow existing connections to finish
-		// (the graceful drain), and finally shut down.
+		// delay allows us to serve normal traffic for a period of time after we have been
+		// removed.  Eventually traffic volume will trail off as service discovery stops
+		// being able to discover us.  Then we stop accepting connections entirely and allow
+		// existing connections to finish (the graceful drain), and finally shut down.
 		zap.L().Info("sleeping before drain to wait for network reprogramming", zap.Duration("duration", t))
 		time.Sleep(t)
 	}
@@ -585,7 +587,6 @@ func listenAndServe(stopCh chan string) error {
 	zap.L().Info("beginning graceful drain", zap.Duration("duration", listenOpts.ShutdownGracePeriod))
 	tctx, c := context.WithTimeout(context.Background(), listenOpts.ShutdownGracePeriod)
 	defer c()
-	healthServer.Shutdown() // nolint
 	for _, h := range drainHandlers {
 		h()
 	}
