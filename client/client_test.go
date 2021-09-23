@@ -56,7 +56,7 @@ func TestWrapRoundTripper(t *testing.T) {
 		t.Errorf("request count:\n  got: %v\n want: %v", got, want)
 	}
 
-	wrapped := WrapRoundTripper(brt, WithLogger(l.Named("test")))
+	wrapped := WrapRoundTripperWithOptions(brt, WithLogger(l.Named("test")))
 
 	res, _ = wrapped.RoundTrip(req)
 	res.Body.Close()

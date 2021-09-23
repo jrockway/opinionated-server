@@ -176,10 +176,10 @@ func WithContextLogger() RoundTripperOption {
 	}
 }
 
-// WrapRoundTripper returns a wrapped version of the provided RoundTripper with tracing and
-// prometheus metrics.  The RoundTripper may be nil, in which case an empty http.Transport will be
-// used.
-func WrapRoundTripper(rt http.RoundTripper, options ...RoundTripperOption) http.RoundTripper {
+// WrapRoundTripperWithOptions returns a wrapped version of the provided RoundTripper with tracing,
+// logging, and prometheus metrics.  The RoundTripper may be nil, in which case an empty
+// http.Transport will be used.
+func WrapRoundTripperWithOptions(rt http.RoundTripper, options ...RoundTripperOption) http.RoundTripper {
 	if rt == nil {
 		rt = &http.Transport{}
 	}
@@ -195,6 +195,13 @@ func WrapRoundTripper(rt http.RoundTripper, options ...RoundTripperOption) http.
 		useContextLogger: rtopts.contextLogger,
 		underlying:       rt,
 	}
+}
+
+// WrapRoundTripper returns a wrapped HTTP round tripper with tracing, logging, and prometheus
+// metrics.  It exists for backwards compatibility reasons; new code should use
+// WrapRoundTripperWithOptions.
+func WrapRoundTripper(rt http.RoundTripper) http.RoundTripper {
+	return WrapRoundTripperWithOptions(rt)
 }
 
 // GRPCInterceptors returns interceptors that you should use when dialing a remote gRPC service,
