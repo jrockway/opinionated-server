@@ -113,6 +113,8 @@ type logOptions struct {
 
 	LogMetadata bool `long:"log_metadata" description:"log headers/metadata for each http or grpc request" env:"LOG_METADATA"`
 	LogPayloads bool `long:"log_payloads" description:"log requests and responses for each http or grpc request; if true, payloads are logged to the logger and reported to jaeger" env:"LOG_PAYLOADS"`
+
+	LogTraces bool `long:"log_traces" description:"if true, log verbose Jaeger debugging information (more verbose than JAEGER_REPORTER_LOG_SPANS=1)" env:"LOG_TRACES"`
 }
 
 type listenOptions struct {
@@ -229,6 +231,9 @@ func setupTracing() error {
 	tracer, closer, err := jcfg.NewTracer(options...)
 	if err != nil {
 		return fmt.Errorf("tracer: %v", err)
+	}
+	if logOpts.LogTraces {
+		tracer = jaegerzap.NewLoggingTracer(zap.L().Named("jaeger_debug"), tracer)
 	}
 	opentracing.SetGlobalTracer(tracer)
 	flushTraces = closer
