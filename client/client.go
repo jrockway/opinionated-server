@@ -8,10 +8,13 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	grpc_logging "github.com/grpc-ecosystem/go-grpc-middleware/logging"
 	grpc_zap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/grpc-ecosystem/grpc-opentracing/go/otgrpc"
 	"github.com/jrockway/opinionated-server/internal/formatters"
@@ -19,7 +22,7 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	jaegerzap "github.com/uber/jaeger-client-go/log/zap"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -42,18 +45,23 @@ var (
 )
 
 type loggingTransport struct {
-	underlying http.RoundTripper
+	logger           *zap.Logger
+	useContextLogger bool
+	underlying       http.RoundTripper
 }
 
 type closeTracker struct {
 	io.ReadCloser
-	start  time.Time
-	logger *zap.Logger
-	res    *http.Response
-	err    error
+	start       time.Time
+	logger      *zap.Logger
+	res         *http.Response
+	err         error
+	finishTrace func()
 }
 
 func (c *closeTracker) Close() error {
+	defer inFlightGauge.Dec()
+	defer c.finishTrace()
 	l := c.logger.With(zap.Duration("duration", time.Since(c.start)))
 	var closeErr error
 	if c.ReadCloser != nil {
@@ -76,56 +84,116 @@ func (c *closeTracker) Close() error {
 	return closeErr
 }
 
+type roundtripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundtripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	l := zap.L().With(zap.String("method", req.Method), zap.String("url", req.URL.String()))
-	reqLogger := l
-	if LogMetadata {
-		reqLogger = l.With(zap.Array("request.headers", &formatters.MetadataWrapper{MD: req.Header}))
+	inFlightGauge.Inc()
+	// NOTE(jrockway): There is a slight flaw with this implementation.  The RoundTripper
+	// doesn't follow redirects (the http.Client that calls into the RoundTripper handles that),
+	// so if you get redirected you end up with two traces, instead of one trace that contains a
+	// span for each redirect.  We'd have to write a custom Do method to handle that case, and
+	// that wouldn't compose well with other middleware you might want.
+	req, tr := nethttp.TraceRequest(opentracing.GlobalTracer(), req)
+	l := t.logger
+	if l == nil {
+		if t.useContextLogger {
+			l = ctxzap.Extract(req.Context())
+		} else {
+			l = zap.L().Named("http_client")
+		}
 	}
-	reqLogger.Debug("outgoing http request")
-	ct := &closeTracker{
-		start:  time.Now(),
-		logger: l,
+	l = l.With(zap.String("method", req.Method), zap.String("url", req.URL.String()))
+	start := time.Now()
+	rt := &nethttp.Transport{
+		RoundTripper: roundtripFunc(func(req *http.Request) (*http.Response, error) {
+			// We're here because we need to get the tracing headers that
+			// nethttp.Transport created in order to produce the most useful log
+			// message.  (But we have to be outside of its RoundTrip function to call
+			// nethttp.TraceRequest.)
+			//
+			// Regrettably, they don't add the trace to the request context, so don't
+			// get the outgoing span ID with jaegerzap.Trace here.  I'll fix that
+			// upstream (https://github.com/opentracing-contrib/go-stdlib/pull/62).
+			l = l.With(jaegerzap.Trace(req.Context()))
+			ct := &closeTracker{
+				start:       start,
+				logger:      l,
+				finishTrace: tr.Finish,
+			}
+			l.Debug("outgoing http request", zap.Array("request.headers", &formatters.MetadataWrapper{MD: req.Header}))
+			req = req.WithContext(ctxzap.ToContext(req.Context(), l))
+			res, err := t.underlying.RoundTrip(req)
+			ct.res = res
+			ct.err = err
+			if res != nil {
+				ct.ReadCloser = res.Body
+				res.Body = ct
+				if err == nil {
+					code := strconv.Itoa(res.StatusCode)
+					method := strings.ToLower(req.Method)
+					requestCount.WithLabelValues(method, code).Inc()
+				}
+			}
+			if req.Method == "HEAD" || res == nil {
+				ct.Close()
+			}
+			return res, err
+		}),
 	}
-	res, err := t.underlying.RoundTrip(req)
-	ct.res = res
-	ct.err = err
-	if res != nil {
-		ct.ReadCloser = res.Body
-		res.Body = ct
-	}
-
-	if req.Method == "HEAD" || res == nil {
-		ct.Close()
-	}
-	return res, err
+	return rt.RoundTrip(req)
 }
 
-type tracingTransport struct {
-	underlying http.RoundTripper
+type roundTripperOptions struct {
+	logger        *zap.Logger
+	contextLogger bool
 }
 
-// RoundTrip implements http.RoundTripper.
-func (t *tracingTransport) RoundTrip(orig *http.Request) (*http.Response, error) {
-	req, tr := nethttp.TraceRequest(opentracing.GlobalTracer(), orig)
-	defer tr.Finish()
-	return t.underlying.RoundTrip(req)
+// RoundTripperOption customizes the behavior of the RoundTripper returned by WrapRoundTripper.
+type RoundTripperOption func(*roundTripperOptions)
+
+// WithLogger causes the RoundTripper returned by WrapRoundTripper to log requests to the provided
+// log, instead of a global logger.
+func WithLogger(l *zap.Logger) RoundTripperOption {
+	return func(o *roundTripperOptions) {
+		o.logger = l
+	}
+}
+
+// WithContextLogger causes the RoundTripper returned by WrapRoundTripper to log requests to the
+// context logger (ctxzap), instead of the global logger.  Note that logs will be suppressed if
+// there is no logger in the context, because ctxzap returns a NoopLogger and we can't inspect that
+// logger and upgrade it to a real logger.
+//
+// If WithLogger is specified, this option is ignored and a warning is logged when creating the
+// roundtripper.
+func WithContextLogger() RoundTripperOption {
+	return func(o *roundTripperOptions) {
+		o.contextLogger = true
+	}
 }
 
 // WrapRoundTripper returns a wrapped version of the provided RoundTripper with tracing and
 // prometheus metrics.  The RoundTripper may be nil, in which case an empty http.Transport will be
 // used.
-func WrapRoundTripper(rt http.RoundTripper) http.RoundTripper {
+func WrapRoundTripper(rt http.RoundTripper, options ...RoundTripperOption) http.RoundTripper {
 	if rt == nil {
 		rt = &http.Transport{}
 	}
-	return &tracingTransport{
-		underlying: promhttp.InstrumentRoundTripperInFlight(inFlightGauge,
-			promhttp.InstrumentRoundTripperCounter(
-				requestCount, &nethttp.Transport{
-					RoundTripper: &loggingTransport{
-						underlying: rt,
-					}})),
+	rtopts := new(roundTripperOptions)
+	for _, opt := range options {
+		opt(rtopts)
+	}
+	if rtopts.logger != nil && rtopts.contextLogger {
+		rtopts.logger.Warn("ignoring WithContextLogger option passed to client.WrapRoundTripper")
+	}
+	return &loggingTransport{
+		logger:           rtopts.logger,
+		useContextLogger: rtopts.contextLogger,
+		underlying:       rt,
 	}
 }
 

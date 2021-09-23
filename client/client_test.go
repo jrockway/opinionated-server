@@ -8,7 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"go.uber.org/zap"
+	"github.com/opentracing/opentracing-go"
+	"github.com/opentracing/opentracing-go/mocktracer"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
 )
@@ -41,10 +42,11 @@ func (rt *boringRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 
 func TestWrapRoundTripper(t *testing.T) {
 	l := zaptest.NewLogger(t, zaptest.Level(zapcore.DebugLevel))
-	zap.ReplaceGlobals(l)
 	brt := &boringRoundTripper{}
-	req := httptest.NewRequest("GET", "https://example.com/", nil)
+	tracer := mocktracer.New()
+	opentracing.SetGlobalTracer(tracer)
 
+	req := httptest.NewRequest("GET", "https://example.com/", nil)
 	res, _ := brt.RoundTrip(req)
 	if got, want := res.StatusCode, http.StatusOK; got != want {
 		t.Errorf("basic roundtripper: status\n  got: %v\n want: %v", got, want)
@@ -54,7 +56,8 @@ func TestWrapRoundTripper(t *testing.T) {
 		t.Errorf("request count:\n  got: %v\n want: %v", got, want)
 	}
 
-	wrapped := WrapRoundTripper(brt)
+	wrapped := WrapRoundTripper(brt, WithLogger(l.Named("test")))
+
 	res, _ = wrapped.RoundTrip(req)
 	res.Body.Close()
 	if got, want := res.StatusCode, http.StatusOK; got != want {
