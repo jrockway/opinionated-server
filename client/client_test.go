@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"github.com/opentracing/opentracing-go"
-	"github.com/opentracing/opentracing-go/mocktracer"
+	"github.com/uber/jaeger-client-go/config"
+	jaegerzap "github.com/uber/jaeger-client-go/log/zap"
+	"github.com/uber/jaeger-client-go/zipkin"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
 )
@@ -42,9 +44,26 @@ func (rt *boringRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 
 func TestWrapRoundTripper(t *testing.T) {
 	l := zaptest.NewLogger(t, zaptest.Level(zapcore.DebugLevel))
-	brt := &boringRoundTripper{}
-	tracer := mocktracer.New()
+	jcfg := config.Configuration{
+		ServiceName: "tests",
+		Sampler: &config.SamplerConfig{
+			Type:  "const",
+			Param: 1,
+		},
+		Reporter: &config.ReporterConfig{
+			LogSpans: true,
+		},
+	}
+	tracer, closer, err := jcfg.NewTracer(
+		config.Logger(jaegerzap.NewLogger(l.Named("jaeger"))),
+		config.Injector(opentracing.HTTPHeaders, zipkin.NewZipkinB3HTTPHeaderPropagator()))
+	if err != nil {
+		t.Fatalf("start jaeger: %v", err)
+	}
 	opentracing.SetGlobalTracer(tracer)
+	defer closer.Close()
+
+	brt := &boringRoundTripper{}
 
 	req := httptest.NewRequest("GET", "https://example.com/", nil)
 	res, _ := brt.RoundTrip(req)
@@ -73,7 +92,7 @@ func TestWrapRoundTripper(t *testing.T) {
 	}
 	res.Body.Close()
 
-	res, err := wrapped.RoundTrip(httptest.NewRequest("PUT", "https://example.com", strings.NewReader("hi")))
+	res, err = wrapped.RoundTrip(httptest.NewRequest("PUT", "https://example.com", strings.NewReader("hi")))
 	if err == nil {
 		t.Errorf("expected error when calling PUT")
 		res.Body.Close()

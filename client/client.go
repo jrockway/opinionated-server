@@ -22,6 +22,7 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/uber/jaeger-client-go"
 	jaegerzap "github.com/uber/jaeger-client-go/log/zap"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -84,12 +85,6 @@ func (c *closeTracker) Close() error {
 	return closeErr
 }
 
-type roundtripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundtripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
-	return f(req)
-}
-
 func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	inFlightGauge.Inc()
 	// NOTE(jrockway): There is a slight flaw with this implementation.  The RoundTripper
@@ -97,7 +92,6 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	// so if you get redirected you end up with two traces, instead of one trace that contains a
 	// span for each redirect.  We'd have to write a custom Do method to handle that case, and
 	// that wouldn't compose well with other middleware you might want.
-	req, tr := nethttp.TraceRequest(opentracing.GlobalTracer(), req)
 	l := t.logger
 	if l == nil {
 		if t.useContextLogger {
@@ -107,44 +101,41 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		}
 	}
 	l = l.With(zap.String("method", req.Method), zap.String("url", req.URL.String()))
-	start := time.Now()
-	rt := &nethttp.Transport{
-		RoundTripper: roundtripFunc(func(req *http.Request) (*http.Response, error) {
-			// We're here because we need to get the tracing headers that
-			// nethttp.Transport created in order to produce the most useful log
-			// message.  (But we have to be outside of its RoundTrip function to call
-			// nethttp.TraceRequest.)
-			//
-			// Regrettably, they don't add the trace to the request context, so don't
-			// get the outgoing span ID with jaegerzap.Trace here.  I'll fix that
-			// upstream (https://github.com/opentracing-contrib/go-stdlib/pull/62).
-			l = l.With(jaegerzap.Trace(req.Context()))
-			ct := &closeTracker{
-				start:       start,
-				logger:      l,
-				finishTrace: tr.Finish,
-			}
-			l.Debug("outgoing http request", zap.Array("request.headers", &formatters.MetadataWrapper{MD: req.Header}))
-			req = req.WithContext(ctxzap.ToContext(req.Context(), l))
-			res, err := t.underlying.RoundTrip(req)
-			ct.res = res
-			ct.err = err
-			if res != nil {
-				ct.ReadCloser = res.Body
-				res.Body = ct
-				if err == nil {
-					code := strconv.Itoa(res.StatusCode)
-					method := strings.ToLower(req.Method)
-					requestCount.WithLabelValues(method, code).Inc()
-				}
-			}
-			if req.Method == "HEAD" || res == nil {
-				ct.Close()
-			}
-			return res, err
-		}),
+	ct := &closeTracker{
+		start:  time.Now(),
+		logger: l,
 	}
-	return rt.RoundTrip(req)
+	req, tr := nethttp.TraceRequest(opentracing.GlobalTracer(), req, nethttp.ClientSpanObserver(
+		func(span opentracing.Span, r *http.Request) {
+			if sc, ok := span.Context().(jaeger.SpanContext); ok {
+				l = l.With(jaegerzap.Context(sc))
+				ct.logger = l
+			}
+			l.Debug("outgoing http request", zap.Array("request.headers", &formatters.MetadataWrapper{MD: r.Header}))
+		},
+	))
+	ct.finishTrace = tr.Finish
+
+	rt := &nethttp.Transport{
+		RoundTripper: t.underlying,
+	}
+	req = req.WithContext(ctxzap.ToContext(req.Context(), l))
+	res, err := rt.RoundTrip(req)
+	ct.res = res
+	ct.err = err
+	if res != nil {
+		ct.ReadCloser = res.Body
+		res.Body = ct
+		if err == nil {
+			code := strconv.Itoa(res.StatusCode)
+			method := strings.ToLower(req.Method)
+			requestCount.WithLabelValues(method, code).Inc()
+		}
+	}
+	if req.Method == "HEAD" || res == nil {
+		ct.Close()
+	}
+	return res, err
 }
 
 type roundTripperOptions struct {
