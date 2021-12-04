@@ -4,8 +4,8 @@ go 1.13
 
 require (
 	github.com/HdrHistogram/hdrhistogram-go v1.1.1 // indirect
-	github.com/felixge/httpsnoop v1.0.1
-	github.com/golang/protobuf v1.5.0
+	github.com/felixge/httpsnoop v1.0.2
+	github.com/golang/protobuf v1.5.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/grpc-ecosystem/grpc-opentracing v0.0.0-20180507213350-8e809c8a8645
@@ -20,6 +20,6 @@ require (
 	go.uber.org/zap v1.19.1
 	golang.org/x/lint v0.0.0-20191125180803-fdd1cda4f05f // indirect
 	golang.org/x/net v0.0.0-20210917221730-978cfadd31cf
-	google.golang.org/grpc v1.40.0
+	google.golang.org/grpc v1.42.0
 	google.golang.org/protobuf v1.27.1
 )
