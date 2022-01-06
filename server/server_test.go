@@ -113,6 +113,8 @@ func TestDefaultServers(t *testing.T) {
 func TestHTTPServer(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Add("content-type", "text/plain")
+		w.Header().Add("x-foo-bar", "baz")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
@@ -122,6 +124,11 @@ func TestHTTPServer(t *testing.T) {
 	ctx, c := context.WithTimeout(context.Background(), 5*time.Second)
 	defer c()
 	runServerTest(ctx, t, func(t *testing.T, info Info) {
+		logOpts.LogMetadata = true
+		defer func() {
+			logOpts.LogMetadata = false
+		}()
+
 		httpClient := &http.Client{Transport: client.WrapRoundTripper(http.DefaultTransport)}
 		req, err := http.NewRequest("get", "http://"+info.HTTPAddress+"/", http.NoBody)
 		if err != nil {
