@@ -77,8 +77,6 @@ func (res *GeneratedHTTPResponse) UnmarshalText(in []byte) error {
 			}
 		case bodyState:
 			buf.WriteByte(b)
-		default:
-			break
 		}
 	}
 	res.Status = http.StatusText(res.StatusCode)
