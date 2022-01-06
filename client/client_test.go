@@ -2,7 +2,7 @@ package client
 
 import (
 	"errors"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -28,7 +28,7 @@ func (rt *boringRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 			Status:     "OK",
 			StatusCode: http.StatusOK,
 			Header:     http.Header{},
-			Body:       ioutil.NopCloser(strings.NewReader("ok")),
+			Body:       io.NopCloser(strings.NewReader("ok")),
 		}, nil
 	case "HEAD":
 		return &http.Response{
@@ -61,11 +61,12 @@ func TestWrapRoundTripper(t *testing.T) {
 		t.Fatalf("start jaeger: %v", err)
 	}
 	opentracing.SetGlobalTracer(tracer)
+	defer opentracing.SetGlobalTracer(opentracing.NoopTracer{})
 	defer closer.Close()
 
 	brt := &boringRoundTripper{}
 
-	req := httptest.NewRequest("GET", "https://example.com/", nil)
+	req := httptest.NewRequest("GET", "https://example.com/", http.NoBody)
 	res, _ := brt.RoundTrip(req)
 	if got, want := res.StatusCode, http.StatusOK; got != want {
 		t.Errorf("basic roundtripper: status\n  got: %v\n want: %v", got, want)

@@ -89,7 +89,7 @@ func TestDefaultServers(t *testing.T) {
 		}
 
 		httpClient := &http.Client{Transport: client.WrapRoundTripper(http.DefaultTransport)}
-		req, err := http.NewRequest("get", "http://"+info.DebugAddress+"/metrics", nil)
+		req, err := http.NewRequest("get", "http://"+info.DebugAddress+"/metrics", http.NoBody)
 		if err != nil {
 			t.Fatalf("new debug request: %v", err)
 		}
@@ -123,7 +123,7 @@ func TestHTTPServer(t *testing.T) {
 	defer c()
 	runServerTest(ctx, t, func(t *testing.T, info Info) {
 		httpClient := &http.Client{Transport: client.WrapRoundTripper(http.DefaultTransport)}
-		req, err := http.NewRequest("get", "http://"+info.HTTPAddress+"/", nil)
+		req, err := http.NewRequest("get", "http://"+info.HTTPAddress+"/", http.NoBody)
 		if err != nil {
 			t.Fatalf("new http request: %v", err)
 		}
@@ -183,7 +183,7 @@ func TestDrain(t *testing.T) {
 	time.AfterFunc(200*time.Millisecond, func() { killCh <- "force drain" })
 
 	httpClient := &http.Client{Transport: client.WrapRoundTripper(http.DefaultTransport)}
-	req, err := http.NewRequestWithContext(context.TODO(), "GET", "http://"+info.DebugAddress+"/wait-for-drain", nil)
+	req, err := http.NewRequestWithContext(context.TODO(), "GET", "http://"+info.DebugAddress+"/wait-for-drain", http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}

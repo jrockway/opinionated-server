@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	_ "net/http/pprof" // nolint
@@ -642,7 +641,7 @@ func ListenAndServe() {
 		termMsg = []byte(fmt.Sprintf("error during shutdown: %v", err))
 	}
 
-	if err := ioutil.WriteFile(terminationLog, termMsg, 0666); err != nil {
+	if err := os.WriteFile(terminationLog, termMsg, 0666); err != nil {
 		zap.L().Info("failed to write termination log", zap.String("path", terminationLog), zap.Error(err))
 	}
 
