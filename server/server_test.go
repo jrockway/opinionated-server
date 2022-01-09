@@ -25,7 +25,7 @@ func isHealthy(ctx context.Context, conn *grpc.ClientConn) error {
 	return nil
 }
 
-func runServerTest(ctx context.Context, t *testing.T, test func(t *testing.T, info Info)) {
+func runServerTest(ctx context.Context, t testing.TB, test func(info Info)) {
 	logOpts.LogMetadata = true
 	logOpts.LogPayloads = true
 	logOpts.LogLevel = "debug"
@@ -62,7 +62,7 @@ func runServerTest(ctx context.Context, t *testing.T, test func(t *testing.T, in
 	case info = <-infoCh:
 	}
 
-	test(t, info)
+	test(info)
 
 	killCh <- "tests done"
 	select {
@@ -78,7 +78,7 @@ func runServerTest(ctx context.Context, t *testing.T, test func(t *testing.T, in
 func TestDefaultServers(t *testing.T) {
 	ctx, c := context.WithTimeout(context.Background(), 5*time.Second)
 	defer c()
-	runServerTest(ctx, t, func(t *testing.T, info Info) {
+	runServerTest(ctx, t, func(info Info) {
 		unaryI, streamI := client.GRPCInterceptors()
 		conn, err := grpc.DialContext(ctx, info.GRPCAddress, grpc.WithBlock(), grpc.WithInsecure(), grpc.WithChainUnaryInterceptor(unaryI...), grpc.WithChainStreamInterceptor(streamI...))
 		if err != nil {
@@ -123,12 +123,7 @@ func TestHTTPServer(t *testing.T) {
 
 	ctx, c := context.WithTimeout(context.Background(), 5*time.Second)
 	defer c()
-	runServerTest(ctx, t, func(t *testing.T, info Info) {
-		logOpts.LogMetadata = true
-		defer func() {
-			logOpts.LogMetadata = false
-		}()
-
+	runServerTest(ctx, t, func(info Info) {
 		httpClient := &http.Client{Transport: client.WrapRoundTripper(http.DefaultTransport)}
 		req, err := http.NewRequest("get", "http://"+info.HTTPAddress+"/", http.NoBody)
 		if err != nil {

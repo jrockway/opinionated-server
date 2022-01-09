@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jrockway/opinionated-server/client/internal/fuzzsupport"
+	"github.com/jrockway/opinionated-server/internal/fuzzsupport"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -37,8 +37,9 @@ func (t cannedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func FuzzLoggingTransportRoundTripResponse(f *testing.F) {
 	f.Add([]byte(""))
-	f.Add([]byte("\x04"))
-	f.Add([]byte("\x1afoo-bar\x00baz\x01\x01foo\x01\x01bar\x00hello"))
+	f.Add([]byte("\x10\x00"))
+	f.Add([]byte("\x04\x02"))
+	f.Add([]byte("\x1a\x02foo-bar\x00baz\x01\x01foo\x01\x01bar\x00hello"))
 	LogMetadata = true
 	LogPayloads = true
 	defer func() {
