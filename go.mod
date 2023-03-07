@@ -20,7 +20,7 @@ require (
 	go.uber.org/automaxprocs v1.4.0
 	go.uber.org/zap v1.19.1
 	golang.org/x/lint v0.0.0-20191125180803-fdd1cda4f05f // indirect
-	golang.org/x/net v0.0.0-20210917221730-978cfadd31cf
+	golang.org/x/net v0.7.0
 	google.golang.org/grpc v1.42.0
 	google.golang.org/protobuf v1.27.1
 )
