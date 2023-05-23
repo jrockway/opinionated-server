@@ -17,7 +17,7 @@ require (
 	github.com/prometheus/client_golang v1.11.1
 	github.com/uber/jaeger-client-go v2.29.1+incompatible
 	github.com/uber/jaeger-lib v2.4.1+incompatible
-	go.uber.org/automaxprocs v1.4.0
+	go.uber.org/automaxprocs v1.5.2
 	go.uber.org/zap v1.19.1
 	golang.org/x/lint v0.0.0-20191125180803-fdd1cda4f05f // indirect
 	golang.org/x/net v0.0.0-20210917221730-978cfadd31cf
